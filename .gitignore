@@ -1,0 +1,31 @@
+# Email functionality files
+email.js
+email-fixed.js
+email-handlers.js
+email-*.js
+*email*.js
+main-with-email.js
+preload-with-email.js
+renderer-with-email.js
+.env
+
+# Backup files
+*.bak*
+
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Build files
+dist/
+build/
+out/
+
+# macOS specific files
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/

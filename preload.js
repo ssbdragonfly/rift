@@ -1,0 +1,18 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('shifted', {
+  parseAndCreateEvent: (input) => ipcRenderer.invoke('parse-and-create-event', input),
+  startAuth: () => ipcRenderer.invoke('start-auth'),
+  oauthCallback: (code) => ipcRenderer.invoke('oauth-callback', code),
+  onFocusInput: (cb) => ipcRenderer.on('focus-input', cb),
+  hideWindow: () => ipcRenderer.send('hide-window'),
+  routePrompt: (input) => ipcRenderer.invoke('route-prompt', input),
+  getUnreadEmails: () => ipcRenderer.invoke('get-unread-emails'),
+  getEmailContent: (messageId) => ipcRenderer.invoke('get-email-content', messageId),
+  saveDraft: (draft) => ipcRenderer.invoke('save-draft', draft),
+  sendDraft: () => ipcRenderer.invoke('send-draft'),
+  storeHistory: (prompt, response) => ipcRenderer.invoke('store-history', prompt, response),
+  getHistory: () => ipcRenderer.invoke('get-history'),
+  startEmailAuth: () => ipcRenderer.invoke('start-email-auth'),
+  emailOAuthCallback: (code) => ipcRenderer.invoke('email-oauth-callback', code)
+});

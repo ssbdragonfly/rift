@@ -1,0 +1,455 @@
+const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
+const path = require('path');
+const isDev = !app.isPackaged;
+const { createEvent, ensureAuth, getAuthUrl, handleOAuthCallback, deleteEvent } = require('./google');
+const { parseEvent } = require('./parser');
+const { google } = require('googleapis');
+const emailFunctions = require('./email');
+const emailHandlers = require('./email-handlers');
+
+let win;
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 480,
+    height: 120,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    transparent: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  win.loadFile('index.html');
+  win.hide();
+}
+
+app.whenReady().then(async () => {
+  createWindow();
+  
+  try {
+    console.log('[main] Checking Google API key:', process.env.GOOGLE_API_KEY ? 'Present' : 'Missing');
+    
+    const { validateAndRefreshAuth, getAuthUrl } = require('./google');
+    const isValid = await validateAndRefreshAuth();
+    if (!isValid) {
+      console.log('[main] Auth validation failed, will prompt for re-auth when needed');
+      try {
+        const keytar = require('keytar');
+        const os = require('os');
+        await keytar.deletePassword('shifted-google-calendar', os.userInfo().username);
+        console.log('[main] Cleared stored credentials');
+      } catch (e) {
+        console.error('[main] Failed to clear credentials:', e);
+      }
+    }
+    else {
+      console.log('[main] Auth validation successful');
+    }
+  }
+  catch (err) {
+    console.error('[main] Error validating auth on startup:', err);
+  }
+  
+  setupEmailHandlers();
+  
+  globalShortcut.register('CommandOrControl+Shift+Space', () => {
+    if (win.isVisible()) {
+      win.hide();
+    } else {
+      win.center();
+      win.show();
+      win.focus();
+      win.webContents.send('focus-input');
+    }
+  });
+});
+
+app.on('window-all-closed', (e) => {
+});
+
+function isCalendarQuery(prompt) {
+  return /\b(what|when|show|list|do i have|upcoming|next|today|tomorrow|this|week|month|schedule|events?|calendar|meetings?|appointments?|on my calendar|my schedule)\b/i.test(prompt) && !/\b(add|create|schedule|set up|make|new)\b/i.test(prompt.substring(0, 20));
+}
+
+function isDeleteEvent(prompt) {
+  return /\b(delete|remove|cancel)\b/i.test(prompt);
+}
+
+function extractTitleForDelete(prompt) {
+  const quotedMatch = prompt.match(/['"]([^'"]+)['"]/);
+  if (quotedMatch){
+    return quotedMatch[1].trim();
+  }
+  
+  const m = prompt.match(/(?:delete|remove|cancel)\s+(.+?)(?:\s+from calendar|\s+from|\s+at|\s+on|$)/i);
+  return m ? m[1].trim() : null;
+}
+
+function extractDateFromPrompt(prompt) {
+  const m = prompt.match(/(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+async function queryCalendar(prompt) {
+  try {
+    const { ensureAuth } = require('./google');
+    const auth = await ensureAuth(win);
+    
+    const calendar = google.calendar({ 
+      version: 'v3', 
+      auth: auth,
+      key: process.env.GOOGLE_API_KEY
+    });
+    
+    const now = new Date();
+    let timeMin = now.toISOString();
+    let timeMax = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    
+    const dateWord = extractDateFromPrompt(prompt);
+    if (dateWord) {
+      let target = new Date();
+      if (dateWord === 'tomorrow') target.setDate(target.getDate() + 1);
+      else if (dateWord === 'today') {}
+      else if (/\d{4}-\d{2}-\d{2}/.test(dateWord)) target = new Date(dateWord);
+      else {
+        const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+        const idx = days.indexOf(dateWord);
+        if (idx !== -1) {
+          const nowIdx = target.getDay();
+          let diff = idx - nowIdx;
+          if (diff <= 0) diff += 7;
+          target.setDate(target.getDate() + diff);
+        }
+      }
+      timeMin = new Date(target.setHours(0,0,0,0)).toISOString();
+      timeMax = new Date(target.setHours(23,59,59,999)).toISOString();
+    }
+    
+    console.log(`[main] Querying calendar from ${timeMin} to ${timeMax}`);
+    
+    const eventsRes = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 10
+    });
+    
+    const events = eventsRes.data.items || [];
+    if (events.length === 0) return 'No events found.';
+    
+    return events.map(ev => {
+      const start = ev.start.dateTime || ev.start.date;
+      const startDate = new Date(start);
+      const timeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      return `${timeStr}: ${ev.summary}`;
+    }).join('\n');
+  }
+  catch (err) {
+    console.error('[main] Error querying calendar:', err);
+    if (err.message === 'auth required') {
+      const { getAuthUrl } = require('./google');
+      const authUrl = await getAuthUrl();
+      shell.openExternal(authUrl);
+      return 'Authentication required. Please check your browser to complete the sign-in process.';
+    }
+
+    return `Error: ${err.message}`;
+  }
+}
+
+async function deleteEventByPrompt(prompt) {
+  try {
+    const { ensureAuth, deleteEvent } = require('./google');
+    const auth = await ensureAuth(win);
+    const calendar = google.calendar({ 
+      version: 'v3', 
+      auth: auth,
+      key: process.env.GOOGLE_API_KEY
+    });
+    
+    const title = extractTitleForDelete(prompt);
+    if (!title) throw new Error('Could not extract event title to delete.');
+    
+    console.log(`[main] Searching for event to delete with title: "${title}"`);
+    
+    const now = new Date();
+    const timeMin = now.toISOString();
+    const timeMax = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    
+    const eventsRes = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 20,
+      q: title
+    });
+    
+    const events = eventsRes.data.items || [];
+    console.log(`[main] Found ${events.length} potential matching events`);
+    const match = events.find(ev => ev.summary && ev.summary.toLowerCase().includes(title.toLowerCase()));
+    if (!match) throw new Error('No matching event found to delete.');
+    
+    await deleteEvent(match.id);
+    return `Deleted event: ${match.summary}`;
+  }
+  catch (err) {
+    console.error('[main] Error deleting event:', err);
+    if (err.message === 'auth required') {
+      const { getAuthUrl } = require('./google');
+      const authUrl = await getAuthUrl();
+      shell.openExternal(authUrl);
+      return 'Authentication required. Please check your browser to complete the sign-in process.';
+    }
+    throw err;
+  }
+}
+
+function setupEmailHandlers() {
+  ipcMain.handle('start-email-auth', async () => {
+    try {
+      const url = await emailFunctions.getEmailAuthUrl();
+      shell.openExternal(url);
+      return true;
+    } catch (err) {
+      console.error('[main] Error starting email auth:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('email-oauth-callback', async (event, code) => {
+    try {
+      await emailFunctions.handleEmailOAuthCallback(code);
+      return { success: true };
+    }
+    catch (err) {
+      console.error('[main] Error in email OAuth callback:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('get-unread-emails', async () => {
+    try {
+      await emailFunctions.ensureEmailAuth(win);
+      const result = await emailFunctions.getUnreadEmails();
+      return result;
+    }
+    catch (err) {
+      console.error('[main] Error getting unread emails:', err);
+      if (err.message === 'auth required') {
+        try {
+          const url = await emailFunctions.getEmailAuthUrl();
+          shell.openExternal(url);
+          return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
+        } catch (authErr) {
+          console.error('[main] Error getting email auth URL:', authErr);
+          return { error: 'Failed to start authentication: ' + authErr.message };
+        }
+      }
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('get-email-content', async (event, messageId) => {
+    try {
+      await emailFunctions.ensureEmailAuth(win);
+      const result = await emailFunctions.getEmailContent(messageId);
+      return result;
+    }
+    catch (err) {
+      console.error('[main] Error getting email content:', err);
+      if (err.message === 'auth required') {
+        try {
+          const url = await emailFunctions.getEmailAuthUrl();
+          shell.openExternal(url);
+          return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
+        }
+        catch (authErr) {
+          console.error('[main] Error getting email auth URL:', authErr);
+          return { error: 'Failed to start authentication: ' + authErr.message };
+        }
+      }
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('save-draft', async (event, draft) => {
+    emailHandlers.currentDraft = draft;
+    return { success: true };
+  });
+
+  ipcMain.handle('send-draft', async () => {
+    try {
+      if (!emailHandlers.currentDraft) {
+        throw new Error('No draft email to send');
+      }
+      
+      await emailFunctions.ensureEmailAuth(win);
+      const result = await emailFunctions.sendEmail(emailHandlers.currentDraft);
+      emailHandlers.currentDraft = null;
+      return { success: true, result };
+    }
+    catch (err) {
+      console.error('[main] Error sending email:', err);
+      if (err.message === 'auth required') {
+        try {
+          const url = await emailFunctions.getEmailAuthUrl();
+          shell.openExternal(url);
+          return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
+        }
+        catch (authErr) {
+          console.error('[main] Error getting email auth URL:', authErr);
+          return { error: 'Failed to start authentication: ' + authErr.message };
+        }
+      }
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('store-history', (event, prompt, response) => {
+    emailHandlers.storePromptInHistory(prompt, response);
+    return { success: true };
+  });
+
+  ipcMain.handle('get-history', () => {
+    return emailHandlers.getPromptHistory();
+  });
+}
+
+ipcMain.handle('route-prompt', async (event, prompt) => {
+  try {
+    const { ensureAuth, getAuthUrl, createEvent, validateAndRefreshAuth } = require('./google');
+    
+    try {
+      const isValid = await validateAndRefreshAuth();
+      if (!isValid) {
+        console.log('[main] Auth validation failed, requesting new authentication');
+        const authUrl = await getAuthUrl();
+        shell.openExternal(authUrl);
+        return { type: 'error', error: 'Authentication required. Please check your browser to complete the sign-in process.' };
+      }
+      
+      await ensureAuth(win);
+    } catch (err) {
+      if (err.message === 'auth required') {
+        const authUrl = await getAuthUrl();
+        shell.openExternal(authUrl);
+        return { type: 'error', error: 'Authentication required. Please check your browser to complete the sign-in process.' };
+      }
+      console.error('[main] Auth error:', err);
+      return { type: 'error', error: `Authentication error: ${err.message}` };
+    }
+    
+    if (emailHandlers.isEmailQuery(prompt)) {
+      return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
+    }
+    
+    if (emailHandlers.isEmailViewRequest(prompt)) {
+      return await emailHandlers.handleEmailViewRequest(prompt, emailFunctions, shell, win);
+    }
+    
+    if (emailHandlers.isEmailDraftRequest(prompt)) {
+      return await emailHandlers.handleEmailDraftRequest(prompt, emailFunctions, shell, win);
+    }
+    
+    if (isDeleteEvent(prompt)) {
+      try {
+        const response = await deleteEventByPrompt(prompt);
+        return { type: 'delete', response };
+      } catch (err) {
+        console.error('[main] Delete event error:', err);
+        return { type: 'error', error: `Failed to delete event: ${err.message}` };
+      }
+    }
+    
+    if (isCalendarQuery(prompt)) {
+      try {
+        const response = await queryCalendar(prompt);
+        return { type: 'query', response };
+      } catch (err) {
+        console.error('[main] Calendar query error:', err);
+        return { type: 'error', error: `Failed to query calendar: ${err.message}` };
+      }
+    }
+    
+    try {
+      const eventData = await parseEvent(prompt);
+      if (typeof eventData === 'string') {
+        return { type: 'chat', response: eventData };
+      }
+      
+      const result = await createEvent(eventData);
+      return { type: 'event', success: true, result };
+    }
+    catch (err) {
+      console.error('[main] Error creating event:', err);
+      return { type: 'error', error: err.message };
+    }
+  }
+  catch (err) {
+    console.error('[main] Unhandled error in route-prompt:', err);
+    return { type: 'error', error: `Unhandled error: ${err.message}` };
+  }
+});
+
+ipcMain.handle('parse-and-create-event', async (event, input) => {
+  try {
+    const eventData = await parseEvent(input);
+    if (typeof eventData === 'string') {
+      return { success: false, error: 'Could not parse event details.' };
+    }
+    
+    const result = await createEvent(eventData);
+    return { success: true, result };
+  } catch (err) {
+    console.error('[main] Error in parse-and-create-event:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('start-auth', async () => {
+  const url = await getAuthUrl();
+  shell.openExternal(url);
+  return true;
+});
+
+ipcMain.handle('oauth-callback', async (event, code) => {
+  try {
+    await handleOAuthCallback(code);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.on('hide-window', () => {
+  if (win && !win.isDestroyed()) {
+    win.hide();
+  }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
+if (process.env.NODE_ENV === 'test') {
+  (async () => {
+    const assert = require('assert');
+    let res = await parseEvent('meeting with Sarah tomorrow at 3pm');
+    assert(res.title && res.start && res.end);
+    let q = await queryCalendar('what do I have tomorrow');
+    assert(typeof q === 'string');
+    let c = await parseEvent('hello!');
+    assert(typeof c === 'string');
+    console.log('All tests passed.');
+    process.exit(0);
+  })();
+}
