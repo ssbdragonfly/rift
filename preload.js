@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('shifted', {
   onFocusInput: (cb) => ipcRenderer.on('focus-input', cb),
   hideWindow: () => ipcRenderer.send('hide-window'),
   routePrompt: (input) => ipcRenderer.invoke('route-prompt', input),
+  resizeWindow: (width, height) => ipcRenderer.send('resize-window', { width, height }),
   getUnreadEmails: () => ipcRenderer.invoke('get-unread-emails'),
   getEmailContent: (messageId) => ipcRenderer.invoke('get-email-content', messageId),
   saveDraft: (draft) => ipcRenderer.invoke('save-draft', draft),

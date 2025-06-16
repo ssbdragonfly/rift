@@ -128,14 +128,20 @@ Output:
 
   else{
     console.log('[parser] Using regex fallback');
+    const isCalendarEvent = /\b(meeting|appointment|call|event|schedule|reminder|standup|lunch|dinner|breakfast)\b/i.test(input) ||/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(input) ||/\b(at|on|from)\s+\d/i.test(input) ||/\d+(am|pm)/i.test(input) ||/\d{1,2}:\d{2}/i.test(input);
+    
+    if (!isCalendarEvent) {
+      console.log('[parser] Input doesn\'t appear to be a calendar event, treating as chat');
+      return `I'm not sure how to create an event from that. Could you provide more details like date and time?`;
+    }
+    
     const m = input.match(/^(.*?)\s+(on|at|from)?\s*([\w\d:apm\-\s]+)?( in ([\w\s]+))?$/i);
-
     const parsed = {
       title: m ? m[1] : input,
       start: null,
       end: null,
-      location: m && m[5] ? m[5] : undefined,
-      description: undefined,
+      location: m && m[5] ? m[5] : null,
+      description: null,
       recurrence: null
     };
     parsed.title = toTitleCase(parsed.title);

@@ -173,12 +173,22 @@ async function handleOAuthCallback(code) {
 
 async function createEvent(parsed) {
   try {
+    if (typeof parsed === 'string') {
+      console.log('[google] Received chat response instead of event data:', parsed);
+      throw new Error(parsed);
+    }
+    
     const auth = await ensureAuth(); 
     const calendar = google.calendar({ 
       version: 'v3', 
       auth: auth,
       key: process.env.GOOGLE_API_KEY
     });
+    
+    if (!parsed || !parsed.title) {
+      console.error('[google] Missing title in parsed event:', parsed);
+      throw new Error('Event parsing failed: missing event title.');
+    }
     
     if (!parsed.start || !parsed.end) {
       console.error('[google] Missing start or end time in parsed event:', parsed);

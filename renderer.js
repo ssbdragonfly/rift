@@ -1,17 +1,6 @@
 const input = document.getElementById('input');
 const status = document.getElementById('status');
-let responseDiv = document.getElementById('response');
-if (!responseDiv) {
-  responseDiv = document.createElement('div');
-  responseDiv.id = 'response';
-  responseDiv.style.marginTop = '10px';
-  responseDiv.style.fontSize = '1.08em';
-  responseDiv.style.color = '#e0e0e0';
-  responseDiv.style.opacity = '0.97';
-  responseDiv.style.minHeight = '1.2em';
-  responseDiv.style.wordBreak = 'break-word';
-  input.parentNode.insertBefore(responseDiv, status.nextSibling);
-}
+const responseDiv = document.getElementById('response');
 
 function showStatus(msg, color = '#a0ffa0') {
   status.textContent = msg;
@@ -19,67 +8,106 @@ function showStatus(msg, color = '#a0ffa0') {
 }
 
 function showResponse(msg) {
-  responseDiv.textContent = msg || '';
+  if (!msg) {
+    responseDiv.innerHTML = '';
+    responseDiv.style.display = 'none';
+    return;
+  }
+  
+  const formattedMsg = formatMarkdown(msg);
+  responseDiv.innerHTML = formattedMsg;
+  responseDiv.style.display = 'block';
+  resizeWindowToFitContent();
+}
+
+function formatMarkdown(text) {
+  if (!text) return '';
+  text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  text = text.replace(/\n/g, '<br>');
+  
+  return text;
+}
+
+function resizeWindowToFitContent() {
+  const container = document.getElementById('bar-container');
+  if (container) {
+    const height = container.scrollHeight + 40;
+    window.shifted.resizeWindow(480, Math.max(300, height));
+  }
 }
 
 async function routePrompt() {
   const val = input.value.trim();
   if (!val) return;
+  
+  console.log('Processing prompt:', val);
   showStatus('Processing...');
   showResponse('');
-  const res = await window.shifted.routePrompt(val);
-  if (res.type === 'event') {
-    if (res.success) {
-      showStatus('Event added to Google Calendar!');
-      input.value = '';
-        if (res.result && res.result.summary) {
-        const startTime = res.result.start && res.result.start.dateTime ? 
-          new Date(res.result.start.dateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
-        const eventDate = res.result.start && res.result.start.dateTime ? 
-          new Date(res.result.start.dateTime).toLocaleDateString() : '';
-        const eventInfo = `Created: ${res.result.summary}${startTime ? ' at ' + startTime : ''}${eventDate ? ' on ' + eventDate : ''}`;
-        showResponse(eventInfo);
-      }
-    }
-    else {
-      showStatus('Error: ' + (res.error || 'Unknown error'), '#ffa0a0');
-    }
-  }
   
-  else if (res.type === 'query' || res.type === 'chat' || res.type === 'delete') {
-    showStatus('');
-    showResponse(res.response || 'No response.');
-  }
-  else if (res.type === 'error') {
-    showStatus(res.error || 'Unknown error', '#ffa0a0');
-    showResponse('');
-  }
-  else {
-    showStatus('Unknown response type.', '#ffa0a0');
-    showResponse('');
+  try {
+    const res = await window.shifted.routePrompt(val);
+    console.log('Response received:', res);
+    
+    if (res.type === 'event') {
+      if (res.success) {
+        showStatus('Event added to Google Calendar!');
+        input.value = '';
+        
+        if (res.result && res.result.summary) {
+          const startTime = res.result.start && res.result.start.dateTime ? 
+            new Date(res.result.start.dateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+          const startDate = res.result.start && res.result.start.dateTime ? 
+            new Date(res.result.start.dateTime).toLocaleDateString() : '';
+          
+          showResponse(`✅ Created: **${res.result.summary}**${startTime ? ' at ' + startTime : ''}${startDate ? ' on ' + startDate : ''}`);
+        }
+      } else {
+        showStatus('Error: ' + (res.error || 'Unknown error'), '#ffa0a0');
+      }
+    } else if (res.type === 'query') {
+      showStatus('Calendar query results:');
+      showResponse(`📅 Here's what I found on your calendar:\n\n${res.response || 'No events found.'}`);
+    } else if (res.type === 'delete') {
+      showStatus('Event deleted successfully!');
+      showResponse(`🗑️ ${res.response || 'Event deleted.'}`);
+    } else if (res.type === 'email-unread') {
+      showStatus('Unread emails:');
+      showResponse(`📬 ${res.response || 'No unread emails.'}`);
+    } else if (res.type === 'email-view') {
+      showStatus('Email content:');
+      showResponse(`📨 ${res.response || 'Email not found.'}`);
+    } else if (res.type === 'email-draft') {
+      showStatus('Email draft created');
+      showResponse(`📝 ${res.response || 'Draft created.'}`);
+    } else if (res.type === 'email-sent') {
+      showStatus('Email sent successfully!');
+      input.value = '';
+      showResponse(`📤 ${res.response || 'Email sent.'}`);
+    } else if (res.type === 'chat') {
+      showStatus('');
+      showResponse(`💬 ${res.response || 'I understand your request.'}`);
+    } else if (res.type === 'error') {
+      showStatus(res.error || 'Unknown error', '#ffa0a0');
+      showResponse(`❌ ${res.error || 'An error occurred.'}`);
+    } else {
+      showStatus('Unknown response type.', '#ffa0a0');
+      showResponse('');
+    }
+  } catch (err) {
+    console.error('Error in routePrompt:', err);
+    showStatus('Error processing request', '#ffa0a0');
+    showResponse(`❌ Error: ${err.message}`);
   }
 }
 
 input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') routePrompt();
+  if (e.key === 'Enter') {
+    console.log('Enter key pressed');
+    e.preventDefault();
+    routePrompt();
+  }
   if (e.key === 'Escape') window.shifted.hideWindow();
-  if (e.metaKey && e.key.toLowerCase() === 'f') {
-    e.preventDefault();
-    input.value = '';
-    showStatus('');
-    showResponse('');
-    input.focus();
-  }
-  
-  if (e.metaKey && e.key.toLowerCase() === 'r') {
-    e.preventDefault();
-    input.value = '';
-    showStatus('');
-    showResponse('');
-    input.focus();
-    showStatus('Prompt reset', '#a0a0ff');
-    setTimeout(() => showStatus(''), 1500);
-  }
 });
 
 window.shifted.onFocusInput(() => {

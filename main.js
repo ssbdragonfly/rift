@@ -12,9 +12,9 @@ let win;
 function createWindow() {
   win = new BrowserWindow({
     width: 480,
-    height: 120,
+    height: 300,
     frame: false,
-    resizable: false,
+    resizable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     transparent: true,
@@ -70,10 +70,12 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', (e) => {
+  // Keep app running in background
 });
 
 function isCalendarQuery(prompt) {
-  return /\b(what|when|show|list|do i have|upcoming|next|today|tomorrow|this|week|month|schedule|events?|calendar|meetings?|appointments?|on my calendar|my schedule)\b/i.test(prompt) && !/\b(add|create|schedule|set up|make|new)\b/i.test(prompt.substring(0, 20));
+  return /\b(what|when|show|list|do i have|upcoming|next|today|tomorrow|this|week|month|schedule|events?|calendar|meetings?|appointments?|on my calendar|my schedule)\b/i.test(prompt) && 
+         !/\b(add|create|schedule|set up|make|new)\b/i.test(prompt.substring(0, 20));
 }
 
 function isDeleteEvent(prompt) {
@@ -214,6 +216,10 @@ async function deleteEventByPrompt(prompt) {
 }
 
 function setupEmailHandlers() {
+  try {
+    ipcMain.removeHandler('start-email-auth');
+  } catch (e) {}
+  
   ipcMain.handle('start-email-auth', async () => {
     try {
       const url = await emailFunctions.getEmailAuthUrl();
@@ -225,6 +231,10 @@ function setupEmailHandlers() {
     }
   });
 
+  try {
+    ipcMain.removeHandler('email-oauth-callback');
+  } catch (e) {}
+  
   ipcMain.handle('email-oauth-callback', async (event, code) => {
     try {
       await emailFunctions.handleEmailOAuthCallback(code);
@@ -236,6 +246,10 @@ function setupEmailHandlers() {
     }
   });
 
+  try {
+    ipcMain.removeHandler('get-unread-emails');
+  } catch (e) {}
+  
   ipcMain.handle('get-unread-emails', async () => {
     try {
       await emailFunctions.ensureEmailAuth(win);
@@ -247,7 +261,7 @@ function setupEmailHandlers() {
       if (err.message === 'auth required') {
         try {
           const url = await emailFunctions.getEmailAuthUrl();
-          shell.openExternal(url);
+          shell.openExternal(authUrl);
           return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
         } catch (authErr) {
           console.error('[main] Error getting email auth URL:', authErr);
@@ -258,6 +272,10 @@ function setupEmailHandlers() {
     }
   });
 
+  try {
+    ipcMain.removeHandler('get-email-content');
+  } catch (e) {}
+  
   ipcMain.handle('get-email-content', async (event, messageId) => {
     try {
       await emailFunctions.ensureEmailAuth(win);
@@ -269,7 +287,7 @@ function setupEmailHandlers() {
       if (err.message === 'auth required') {
         try {
           const url = await emailFunctions.getEmailAuthUrl();
-          shell.openExternal(url);
+          shell.openExternal(authUrl);
           return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
         }
         catch (authErr) {
@@ -281,11 +299,19 @@ function setupEmailHandlers() {
     }
   });
 
+  try {
+    ipcMain.removeHandler('save-draft');
+  } catch (e) {}
+  
   ipcMain.handle('save-draft', async (event, draft) => {
     emailHandlers.currentDraft = draft;
     return { success: true };
   });
 
+  try {
+    ipcMain.removeHandler('send-draft');
+  } catch (e) {}
+  
   ipcMain.handle('send-draft', async () => {
     try {
       if (!emailHandlers.currentDraft) {
@@ -302,7 +328,7 @@ function setupEmailHandlers() {
       if (err.message === 'auth required') {
         try {
           const url = await emailFunctions.getEmailAuthUrl();
-          shell.openExternal(url);
+          shell.openExternal(authUrl);
           return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
         }
         catch (authErr) {
@@ -314,11 +340,19 @@ function setupEmailHandlers() {
     }
   });
 
+  try {
+    ipcMain.removeHandler('store-history');
+  } catch (e) {}
+  
   ipcMain.handle('store-history', (event, prompt, response) => {
     emailHandlers.storePromptInHistory(prompt, response);
     return { success: true };
   });
 
+  try {
+    ipcMain.removeHandler('get-history');
+  } catch (e) {}
+  
   ipcMain.handle('get-history', () => {
     return emailHandlers.getPromptHistory();
   });
@@ -327,6 +361,18 @@ function setupEmailHandlers() {
 ipcMain.handle('route-prompt', async (event, prompt) => {
   try {
     const { ensureAuth, getAuthUrl, createEvent, validateAndRefreshAuth } = require('./google');
+    
+    if (emailHandlers.isEmailQuery(prompt)) {
+      return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
+    }
+    
+    if (emailHandlers.isEmailViewRequest(prompt)) {
+      return await emailHandlers.handleEmailViewRequest(prompt, emailFunctions, shell, win);
+    }
+    
+    if (emailHandlers.isEmailDraftRequest(prompt)) {
+      return await emailHandlers.handleEmailDraftRequest(prompt, emailFunctions, shell, win);
+    }
     
     try {
       const isValid = await validateAndRefreshAuth();
@@ -346,18 +392,6 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
       }
       console.error('[main] Auth error:', err);
       return { type: 'error', error: `Authentication error: ${err.message}` };
-    }
-    
-    if (emailHandlers.isEmailQuery(prompt)) {
-      return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
-    }
-    
-    if (emailHandlers.isEmailViewRequest(prompt)) {
-      return await emailHandlers.handleEmailViewRequest(prompt, emailFunctions, shell, win);
-    }
-    
-    if (emailHandlers.isEmailDraftRequest(prompt)) {
-      return await emailHandlers.handleEmailDraftRequest(prompt, emailFunctions, shell, win);
     }
     
     if (isDeleteEvent(prompt)) {
@@ -381,36 +415,47 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
     }
     
     try {
-      const eventData = await parseEvent(prompt);
-      if (typeof eventData === 'string') {
-        return { type: 'chat', response: eventData };
+      const parsed = await parseEvent(prompt);
+      if (typeof parsed === 'string') {
+        return { type: 'chat', response: parsed };
       }
       
-      const result = await createEvent(eventData);
+      if (!parsed.start || !parsed.end) {
+        return { 
+          type: 'chat', 
+          response: `I understood you want to create an event titled "${parsed.title}", but I need more information about the date and time.` 
+        };
+      }
+      
+      const result = await createEvent(parsed);
       return { type: 'event', success: true, result };
+    } catch (err) {
+      console.error('[main] Error in event creation:', err);
+      if (err.message && err.message.includes('auth')) {
+        return { type: 'error', error: 'Authentication issue: ' + err.message };
+      }
+      return { type: 'chat', response: 'I understood your request but encountered an issue: ' + err.message };
     }
-    catch (err) {
-      console.error('[main] Error creating event:', err);
-      return { type: 'error', error: err.message };
-    }
-  }
-  catch (err) {
+  } catch (err) {
     console.error('[main] Unhandled error in route-prompt:', err);
-    return { type: 'error', error: `Unhandled error: ${err.message}` };
+    return { type: 'error', error: err.message };
   }
 });
 
 ipcMain.handle('parse-and-create-event', async (event, input) => {
   try {
-    const eventData = await parseEvent(input);
-    if (typeof eventData === 'string') {
-      return { success: false, error: 'Could not parse event details.' };
-    }
-    
-    const result = await createEvent(eventData);
+    const parsed = await parseEvent(input);
+    await ensureAuth(win);
+    const result = await createEvent(parsed);
+    console.log('[main] Event created successfully:', result);
     return { success: true, result };
   } catch (err) {
     console.error('[main] Error in parse-and-create-event:', err);
+    if (err.message === 'auth required') {
+      const authUrl = await getAuthUrl();
+      shell.openExternal(authUrl);
+      return { success: false, error: 'Authentication required. Please check your browser.' };
+    }
     return { success: false, error: err.message };
   }
 });
@@ -436,20 +481,12 @@ ipcMain.on('hide-window', () => {
   }
 });
 
+ipcMain.on('resize-window', (event, { width, height }) => {
+  if (win && !win.isDestroyed()) {
+    win.setSize(width, height);
+  }
+});
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
-
-if (process.env.NODE_ENV === 'test') {
-  (async () => {
-    const assert = require('assert');
-    let res = await parseEvent('meeting with Sarah tomorrow at 3pm');
-    assert(res.title && res.start && res.end);
-    let q = await queryCalendar('what do I have tomorrow');
-    assert(typeof q === 'string');
-    let c = await parseEvent('hello!');
-    assert(typeof c === 'string');
-    console.log('All tests passed.');
-    process.exit(0);
-  })();
-}

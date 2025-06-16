@@ -1,19 +1,9 @@
-# Email functionality files
-email.js
-email-fixed.js
-email-handlers.js
-email-*.js
-*email*.js
-main-with-email.js
-preload-with-email.js
-renderer-with-email.js
-.env
-
 # Backup files
 *.bak*
 
 # Environment variables
 .env
+test.js
 
 # Node modules
 node_modules/
