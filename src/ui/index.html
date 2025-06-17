@@ -92,7 +92,7 @@
     }
     
     #response.follow-up-mode::before {
-      content: "Follow-up mode - Type to improve this draft";
+      content: attr(data-follow-up-label);
       position: absolute;
       top: 0;
       right: 0;
@@ -102,6 +102,7 @@
       padding: 4px 10px;
       border-radius: 0 8px 0 8px;
       font-weight: bold;
+      z-index: 10;
     }
     
     @keyframes fadeIn {
@@ -159,6 +160,6 @@
     <div id="status"></div>
     <div id="response"></div>
   </div>
-  <script src="renderer.js"></script>
+  <script src="./renderer.js"></script>
 </body>
 </html>

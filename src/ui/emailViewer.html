@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Viewer</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+      color: #333;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    .email-header {
+      background-color: #fff;
+      border-radius: 8px 8px 0 0;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .email-subject {
+      font-size: 1.5em;
+      margin: 0 0 15px 0;
+      color: #333;
+    }
+    
+    .email-meta {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 8px;
+      margin-bottom: 5px;
+      font-size: 0.9em;
+    }
+    
+    .email-meta-label {
+      color: #666;
+      font-weight: 500;
+    }
+    
+    .email-body {
+      background-color: #fff;
+      border-radius: 0 0 8px 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      line-height: 1.6;
+    }
+    
+    .reply-section {
+      background-color: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .reply-textarea {
+      width: 100%;
+      min-height: 150px;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 1em;
+      margin-bottom: 15px;
+      resize: vertical;
+    }
+    
+    .reply-button {
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .reply-button:hover {
+      background-color: #0069b9;
+    }
+    
+    .reply-button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .status-message {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    
+    a {
+      color: #0078d4;
+      text-decoration: none;
+    }
+    
+    a:hover {
+      text-decoration: underline;
+    }
+    
+    .suggested-response {
+      background-color: #e6f7ff;
+      border-left: 3px solid #1890ff;
+      padding: 10px 15px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+    }
+    
+    .suggested-response h3 {
+      margin-top: 0;
+      color: #1890ff;
+    }
+    
+    .use-suggestion-btn {
+      background-color: #1890ff;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+      margin-top: 10px;
+    }
+    
+    .use-suggestion-btn:hover {
+      background-color: #40a9ff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="email-header">
+      <h1 class="email-subject" id="email-subject">Loading...</h1>
+      <div class="email-meta">
+        <span class="email-meta-label">From:</span>
+        <span id="email-from">Loading...</span>
+      </div>
+      <div class="email-meta">
+        <span class="email-meta-label">To:</span>
+        <span id="email-to">Loading...</span>
+      </div>
+      <div class="email-meta">
+        <span class="email-meta-label">Date:</span>
+        <span id="email-date">Loading...</span>
+      </div>
+    </div>
+    
+    <div class="email-body" id="email-body">
+      Loading email content...
+    </div>
+    
+    <div class="reply-section">
+      <h2>Reply</h2>
+      <div id="suggested-response" class="suggested-response" style="display: none;">
+        <h3>Suggested Response</h3>
+        <div id="suggested-response-text"></div>
+        <button id="use-suggestion-btn" class="use-suggestion-btn">Use This Response</button>
+      </div>
+      <textarea id="reply-textarea" class="reply-textarea" placeholder="Type your reply here..."></textarea>
+      <button id="reply-button" class="reply-button">Send Reply</button>
+      <div id="status-message" class="status-message" style="display: none;"></div>
+    </div>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const subjectElement = document.getElementById('email-subject');
+      const fromElement = document.getElementById('email-from');
+      const toElement = document.getElementById('email-to');
+      const dateElement = document.getElementById('email-date');
+      const bodyElement = document.getElementById('email-body');
+      const replyTextarea = document.getElementById('reply-textarea');
+      const replyButton = document.getElementById('reply-button');
+      const statusMessage = document.getElementById('status-message');
+      const suggestedResponseDiv = document.getElementById('suggested-response');
+      const suggestedResponseText = document.getElementById('suggested-response-text');
+      const useSuggestionBtn = document.getElementById('use-suggestion-btn');
+      
+      let currentEmail = null;
+      
+      function displayEmail(email) {
+        currentEmail = email;
+        subjectElement.textContent = email.subject;
+        fromElement.textContent = email.from;
+        toElement.textContent = email.to;
+        dateElement.textContent = email.date;
+        
+        if (email.htmlBody) {
+          const iframe = document.createElement('iframe');
+          iframe.style.width = '100%';
+          iframe.style.height = '500px';
+          iframe.style.border = 'none';
+          iframe.sandbox = 'allow-same-origin allow-popups';
+          bodyElement.innerHTML = '';
+          bodyElement.appendChild(iframe);
+          
+          let processedHtml = email.htmlBody.replace(
+            /<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1/g, 
+            (match, quote, url) => `<a href=${quote}#${quote} onclick="parent.postMessage({type:'link',url:'${url}'}, '*')"`
+          );
+          
+          processedHtml = `
+            <base target="_blank">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+              img { max-width: 100%; height: auto; }
+            </style>
+            ${processedHtml}
+          `;
+          
+          iframe.onload = () => {
+            iframe.style.height = (iframe.contentWindow.document.body.scrollHeight + 20) + 'px';
+          };
+          iframe.srcdoc = processedHtml;
+          window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'link' && event.data.url) {
+              window.emailViewer.openExternal(event.data.url);
+            }
+          });
+        }
+        else {
+          const processedBody = email.body
+            .replace(/https?:\/\/[^\s]+/g, match => `<a href="#" onclick="window.emailViewer.openExternal('${match}'); return false;">${match}</a>`)
+            .replace(/\n/g, '<br>');
+          
+          bodyElement.innerHTML = processedBody;
+        }
+        
+        const fromName = email.from.split('<')[0].trim();
+        replyTextarea.value = `Hi ${fromName},\n\n\n\nBest regards,`;
+        
+        if (email.suggestedResponse) {
+          suggestedResponseText.textContent = email.suggestedResponse;
+          suggestedResponseDiv.style.display = 'block';
+        } else {
+          suggestedResponseDiv.style.display = 'none';
+        }
+      }
+      
+      useSuggestionBtn.addEventListener('click', () => {
+        replyTextarea.value = suggestedResponseText.textContent;
+      });
+      
+      window.emailViewer.onDisplayEmail(displayEmail);
+      try {
+        const email = await window.emailViewer.getCurrentEmail();
+        if (email) {
+          displayEmail(email);
+        }
+      }
+      catch (err) {
+        console.error('Error getting current email:', err);
+      }
+      
+      replyButton.addEventListener('click', async () => {
+        if (!replyTextarea.value.trim()) {
+          showStatus('Please enter a reply message', 'error');
+          return;
+        }
+        
+        replyButton.disabled = true;
+        replyButton.textContent = 'Sending...';
+        
+        try {
+          const result = await window.emailViewer.replyToEmail({
+            body: replyTextarea.value
+          });
+          
+          if (result.success) {
+            showStatus('Reply sent successfully!', 'success');
+            replyTextarea.value = '';
+          }
+          else {
+            showStatus(`Error: ${result.error || 'Failed to send reply'}`, 'error');
+          }
+        }
+        catch (err) {
+          showStatus(`Error: ${err.message || 'Failed to send reply'}`, 'error');
+        }
+        finally {
+          replyButton.disabled = false;
+          replyButton.textContent = 'Send Reply';
+        }
+      });
+      
+      function showStatus(message, type) {
+        statusMessage.textContent = message;
+        statusMessage.className = `status-message ${type}`;
+        statusMessage.style.display = 'block';
+        setTimeout(() => {
+          statusMessage.style.display = 'none';
+        }, 5000);
+      }
+    });
+  </script>
+</body>
+</html>

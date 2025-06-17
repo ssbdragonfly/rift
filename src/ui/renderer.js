@@ -11,6 +11,34 @@ function clearFollowUpMode() {
   responseDiv.classList.remove('follow-up-mode');
   delete responseDiv.dataset.contextPrompt;
   delete responseDiv.dataset.contextResponse;
+  delete responseDiv.dataset.followUpLabel;
+  delete responseDiv.dataset.followUpMode;
+}
+
+function setFollowUpMode(prompt, response, mode = 'draft', label = null) {
+  responseDiv.dataset.contextPrompt = prompt;
+  responseDiv.dataset.contextResponse = response;
+  responseDiv.dataset.followUpMode = mode;
+  
+  if (label) {
+    responseDiv.dataset.followUpLabel = label;
+  } else {
+    switch (mode) {
+      case 'draft':
+        responseDiv.dataset.followUpLabel = 'Follow-up mode - Type to improve this draft';
+        break;
+      case 'email-search':
+        responseDiv.dataset.followUpLabel = 'Follow-up mode - Select an email to view';
+        break;
+      case 'email-view':
+        responseDiv.dataset.followUpLabel = 'Follow-up mode - Ask about this email';
+        break;
+      default:
+        responseDiv.dataset.followUpLabel = 'Follow-up mode';
+    }
+  }
+  
+  responseDiv.classList.add('follow-up-mode');
 }
 
 function showResponse(msg) {
@@ -53,6 +81,7 @@ async function routePrompt() {
   const isFollowUp = responseDiv.classList.contains('follow-up-mode');
   const contextPrompt = responseDiv.dataset.contextPrompt;
   const contextResponse = responseDiv.dataset.contextResponse;
+  const followUpMode = responseDiv.dataset.followUpMode;
   
   if (!isFollowUp) {
     showResponse('');
@@ -60,8 +89,8 @@ async function routePrompt() {
   
   let effectivePrompt = val;
   if (isFollowUp && contextPrompt) {
-    console.log('Using follow-up context');
-    effectivePrompt = `FOLLOW_UP_CONTEXT: ${contextPrompt}\nPREVIOUS_RESPONSE: ${contextResponse}\nNEW_PROMPT: ${val}`;
+    console.log('Using follow-up context, mode:', followUpMode);
+    effectivePrompt = `FOLLOW_UP_CONTEXT: ${contextPrompt}\nPREVIOUS_RESPONSE: ${contextResponse}\nFOLLOW_UP_MODE: ${followUpMode || 'general'}\nNEW_PROMPT: ${val}`;
   }
   
   try {
@@ -81,6 +110,7 @@ async function routePrompt() {
           
           showResponse(`✅ Created: **${res.result.summary}**${startTime ? ' at ' + startTime : ''}${startDate ? ' on ' + startDate : ''}`);
         }
+        clearFollowUpMode();
       } else {
         showStatus('Error: ' + (res.error || 'Unknown error'), '#ffa0a0');
       }
@@ -97,28 +127,48 @@ async function routePrompt() {
           
           showResponse(`✅ Modified: **${res.result.summary}**${startTime ? ' at ' + startTime : ''}${startDate ? ' on ' + startDate : ''}\n\nChanges: ${res.changes}`);
         }
+        clearFollowUpMode();
       } else {
         showStatus('Error: ' + (res.error || 'Unknown error'), '#ffa0a0');
       }
     } else if (res.type === 'query') {
       showStatus('Calendar query results:');
       showResponse(`📅 Here's what I found on your calendar:\n\n${res.response || 'No events found.'}`);
+      clearFollowUpMode();
     } else if (res.type === 'delete') {
       showStatus('Event deleted successfully!');
       showResponse(`🗑️ ${res.response || 'Event deleted.'}`);
+      clearFollowUpMode();
     } else if (res.type === 'email-unread') {
       showStatus('Unread emails:');
       showResponse(`📬 ${res.response || 'No unread emails.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'email-search-results') {
+      showStatus('Email search results:');
+      showResponse(`🔍 ${res.response || 'No matching emails found.'}`);
+      
+      // Enable follow-up mode for email search results
+      if (res.followUpMode) {
+        setFollowUpMode(val, res.response, 'email-search', 'Follow-up mode - Select an email to view');
+      } else {
+        clearFollowUpMode();
+      }
     } else if (res.type === 'email-view') {
       showStatus('Email content:');
       showResponse(`📨 ${res.response || 'Email not found.'}`);
+      
+      // Enable follow-up mode for email viewing
+      if (res.followUpMode) {
+        setFollowUpMode(val, res.response, 'email-view', 'Follow-up mode - Ask about this email');
+      } else {
+        clearFollowUpMode();
+      }
     } else if (res.type === 'email-draft') {
       showStatus('Email draft created');
       showResponse(`📝 ${res.response || 'Draft created.'}`);
       
-      responseDiv.dataset.contextPrompt = val;
-      responseDiv.dataset.contextResponse = res.response || 'Draft created.';
-      responseDiv.classList.add('follow-up-mode');
+      // Enable follow-up mode for email drafts
+      setFollowUpMode(val, res.response, 'draft', 'Follow-up mode - Type to improve this draft');
     } else if (res.type === 'email-sent') {
       showStatus('Email sent successfully!');
       input.value = '';
@@ -127,12 +177,14 @@ async function routePrompt() {
     } else if (res.type === 'chat') {
       showStatus('');
       showResponse(`💬 ${res.response || 'I understand your request.'}`);
+      clearFollowUpMode();
     } else if (res.type === 'error') {
       showStatus(res.error || 'Unknown error', '#ffa0a0');
       showResponse(`❌ ${res.error || 'An error occurred.'}`);
     } else {
       showStatus('Unknown response type.', '#ffa0a0');
       showResponse('');
+      clearFollowUpMode();
     }
   } catch (err) {
     console.error('Error in routePrompt:', err);
@@ -167,6 +219,29 @@ input.addEventListener('keydown', (e) => {
     const currentPrompt = input.value.trim();
     const currentResponse = responseDiv.innerHTML.trim();
     
+    // If we're already in follow-up mode, just show a message
+    if (responseDiv.classList.contains('follow-up-mode')) {
+      showStatus('Already in follow-up mode', '#ffa0a0');
+      setTimeout(() => showStatus(''), 1500);
+      return;
+    }
+    
+    // If there's content in the response area, use that for follow-up
+    if (responseDiv.innerHTML.trim()) {
+      console.log('Setting follow-up mode from current response');
+      setFollowUpMode(
+        currentPrompt || 'Previous conversation', 
+        responseDiv.innerHTML.trim(),
+        'general',
+        'Follow-up mode - Continue the conversation'
+      );
+      input.value = '';
+      showStatus('Follow-up mode enabled. Your next message will continue this conversation.');
+      setTimeout(() => showStatus(''), 2000);
+      return;
+    }
+    
+    // Otherwise, try to get history
     if (currentPrompt || currentResponse) {
       console.log('Storing prompt and response for follow-up');
       window.shifted.storeHistory(currentPrompt, currentResponse)
@@ -176,14 +251,17 @@ input.addEventListener('keydown', (e) => {
         .then(history => {
           if (history && history.length > 0) {
             input.value = '';
-            showStatus('Prompt stored. You can now follow up on this conversation.');
-            responseDiv.dataset.contextPrompt = history[0].prompt;
-            responseDiv.dataset.contextResponse = history[0].response;
-            responseDiv.classList.add('follow-up-mode');
+            showStatus('Follow-up mode enabled. Your next message will continue this conversation.');
+            setFollowUpMode(
+              history[0].prompt, 
+              history[0].response,
+              'general',
+              'Follow-up mode - Continue the conversation'
+            );
             
             setTimeout(() => showStatus(''), 2000);
           } else {
-            showStatus('Prompt stored');
+            showStatus('No history available for follow-up');
             setTimeout(() => showStatus(''), 1500);
           }
         })
@@ -191,6 +269,9 @@ input.addEventListener('keydown', (e) => {
           console.error('Error storing history:', err);
           showStatus('Error storing history', '#ffa0a0');
         });
+    } else {
+      showStatus('No content to use for follow-up');
+      setTimeout(() => showStatus(''), 1500);
     }
   }
   
@@ -208,6 +289,7 @@ input.addEventListener('keydown', (e) => {
                 showStatus('Email sent successfully!');
                 input.value = '';
                 showResponse('📤 Email sent successfully!');
+                clearFollowUpMode();
               } else {
                 showStatus('Failed to send email: ' + (result.error || 'Unknown error'), '#ffa0a0');
               }
@@ -224,6 +306,7 @@ input.addEventListener('keydown', (e) => {
             showStatus('Email sent successfully!');
             input.value = '';
             showResponse('📤 Email sent successfully!');
+            clearFollowUpMode();
           } else {
             showStatus('Failed to send email: ' + (result.error || 'Unknown error'), '#ffa0a0');
           }

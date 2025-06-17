@@ -2,7 +2,7 @@
   "name": "shifted",
   "version": "0.1.0",
   "description": "Shifted: Natural language Google Calendar event creator for macOS (Electron)",
-  "main": "main.js",
+  "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",

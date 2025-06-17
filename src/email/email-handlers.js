@@ -25,15 +25,54 @@ function isEmailQuery(prompt) {
   return isQuery;
 }
 
-function isEmailViewRequest(prompt) {
-  return /\b(view|read|open|show)\s+(email|mail|message)\b/i.test(prompt) && /\b(id|number|#)\b/i.test(prompt);
+async function isEmailViewRequest(prompt) {
+  if (/\b(view|read|open|show)\s+(email|mail|message)\b/i.test(prompt) && /\b(id|number|#)\b/i.test(prompt)) {
+    return true;
+  }
+  
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const axios = require('axios');
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
+      
+      const geminiPrompt = `
+      Determine if this request is asking to view a specific email: "${prompt}"
+      
+      Examples of viewing specific emails:
+      - "show me the email from Wall Street Journal"
+      - "open the amazon prime email"
+      - "read the email about meeting tomorrow"
+      - "show me the helpbnk email"
+      
+      Examples that are NOT viewing specific emails:
+      - "do I have any unread emails"
+      - "check my inbox"
+      - "show me my emails"
+      
+      Return only "true" if the request is asking to view a specific email, or "false" otherwise.
+      `;
+      
+      const body = {
+        contents: [{ parts: [{ text: geminiPrompt }] }]
+      };
+      
+      const resp = await axios.post(url, body, { timeout: 5000 });
+      const text = resp.data.candidates[0].content.parts[0].text.trim().toLowerCase();
+      
+      return text.includes('true');
+    }
+    catch (err) {
+      console.error('[email-handlers] Error using Gemini for intent detection:', err);
+      
+      return /\b(view|read|open|show)\s+(email|mail|message)\s+(about|from|containing|with|regarding)\s+(.+)/i.test(prompt) ||/\b(view|read|open|show)\s+.{1,20}\s+(email|mail|message)\b/i.test(prompt);
+    }
+  }
+  
+  return /\b(view|read|open|show)\s+(email|mail|message)\s+(about|from|containing|with|regarding)\s+(.+)/i.test(prompt) ||/\b(view|read|open|show)\s+.{1,20}\s+(email|mail|message)\b/i.test(prompt);
 }
 
 function isEmailDraftRequest(prompt) {
-  return /\b(draft|write|compose|create|send)\s+(email|mail|message)\b/i.test(prompt) ||
-         /\b(email|mail|message)\s+(to|for)\b/i.test(prompt) ||
-         /\b(draft|write|compose|create|send).+\b(to|for)\s+[^\s@]+@[^\s@]+\.[^\s@]+/i.test(prompt) ||
-         /\b(email|mail|message)\s+([a-z]+)\b/i.test(prompt); // Simple pattern to catch "email bob"
+  return /\b(draft|write|compose|create|send)\s+(email|mail|message)\b/i.test(prompt) ||/\b(email|mail|message)\s+(to|for)\b/i.test(prompt) ||/\b(draft|write|compose|create|send).+\b(to|for)\s+[^\s@]+@[^\s@]+\.[^\s@]+/i.test(prompt) ||/\b(email|mail|message)\s+([a-z]+)\b/i.test(prompt);
 }
 
 async function handleEmailQuery(prompt, emailFunctions, shell, win) {
@@ -79,7 +118,7 @@ async function handleEmailQuery(prompt, emailFunctions, shell, win) {
         console.log('[email-handlers] Using summarized emails');
         return { 
           type: 'email-unread', 
-          response: `You have ${result.count} unread email(s):\n\n${summarized.summary}` 
+          response: `You have ${result.count} unread email(s) in total. Here are summaries of the ${result.displayCount || result.emails.length} most recent:\n\n${summarized.summary}` 
         };
       }
     } catch (err) {
@@ -90,7 +129,7 @@ async function handleEmailQuery(prompt, emailFunctions, shell, win) {
     
     return { 
       type: 'email-unread', 
-      response: `You have ${result.count} unread email(s):\n\n${emailList}` 
+      response: `You have ${result.count} unread email(s) in total. Here are the ${result.displayCount || result.emails.length} most recent:\n\n${emailList}` 
     };
   } catch (err) {
     console.error('[email] Error handling email query:', err);
@@ -112,30 +151,58 @@ async function handleEmailViewRequest(prompt, emailFunctions, shell, win) {
       return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
     }
     
-    const match = prompt.match(/\b(id|number|#)\s*(\d+)\b/i);
-    if (!match) {
-      return { type: 'chat', response: 'Please specify which email you want to view by number (e.g., "view email #2").' };
-    }
-    
-    const emailNumber = parseInt(match[2]);
-    
     await emailFunctions.ensureEmailAuth(win);
-    const unreadResult = await emailFunctions.getUnreadEmails(10); 
+    const numberMatch = prompt.match(/\b(id|number|#)\s*(\d+)\b/i);
+    const searchMatch = prompt.match(/\b(view|read|open|show)\s+(email|mail|message)\s+(about|from|containing|with)\s+(.+)/i);
     
-    if (unreadResult.error) {
-      return { type: 'error', error: unreadResult.error };
+    if (numberMatch) {
+      const emailNumber = parseInt(numberMatch[2]);
+      const unreadResult = await emailFunctions.getUnreadEmails(10); 
+      
+      if (unreadResult.error) {
+        return { type: 'error', error: unreadResult.error };
+      }
+      
+      if (unreadResult.count === 0) {
+        return { type: 'email-view', response: 'You have no unread emails to view.' };
+      }
+      
+      if (emailNumber < 1 || emailNumber > unreadResult.emails.length) {
+        return { type: 'email-view', response: `Invalid email number. You have ${unreadResult.count} unread email(s).` };
+      }
+      
+      const email = unreadResult.emails[emailNumber - 1];
+      const emailContent = await emailFunctions.getEmailContent(email.id);
+    } 
+    else if (searchMatch) {
+      const searchTerm = searchMatch[4].trim();
+      console.log(`[email-handlers] Searching for email with term: "${searchTerm}"`);
+      
+      const emailSearch = require('./emailSearch');
+      const auth = await emailFunctions.ensureEmailAuth();
+      const searchResult = await emailSearch.findEmailsBySubjectOrSender(auth, searchTerm);
+      
+      if (searchResult.count === 0) {
+        return { type: 'email-view', response: `No emails found matching "${searchTerm}".` };
+      }
+      
+      if (searchResult.count > 1) {
+        const emailList = searchResult.emails.map((email, index) => {
+          return `${index + 1}. ${email.subject}\nFrom: ${email.from}\nDate: ${email.date}\n${email.snippet}\n`;
+        }).join('\n');
+        
+        return { 
+          type: 'email-unread', 
+          response: `Found ${searchResult.count} emails matching "${searchTerm}":\n\n${emailList}\n\nPlease specify which email to view by number (e.g., "view email #1").` 
+        };
+      }
+      
+      const email = searchResult.emails[0];
+      const emailContent = await emailFunctions.getEmailContent(email.id);
     }
-    
-    if (unreadResult.count === 0) {
-      return { type: 'email-view', response: 'You have no unread emails to view.' };
+    else {
+      return { type: 'chat', response: 'Please specify which email you want to view by number (e.g., "view email #2") or by content (e.g., "show email about meeting").' };
     }
-    
-    if (emailNumber < 1 || emailNumber > unreadResult.emails.length) {
-      return { type: 'email-view', response: `Invalid email number. You have ${unreadResult.count} unread email(s).` };
-    }
-    
-    const email = unreadResult.emails[emailNumber - 1];
-    const emailContent = await emailFunctions.getEmailContent(email.id);
     
     if (emailContent.error) {
       return { type: 'error', error: emailContent.error };
@@ -151,13 +218,17 @@ async function handleEmailViewRequest(prompt, emailFunctions, shell, win) {
       console.error('[email] Error analyzing email for response:', err);
     }
     
+    const emailViewer = require('./emailViewer');
+    emailViewer.showEmail(emailContent);
+    
     const formattedEmail = `
 Subject: ${emailContent.subject}
 From: ${emailContent.from}
 To: ${emailContent.to}
 Date: ${emailContent.date}
 
-${emailContent.body}${responseAnalysis}
+Email opened in viewer window. You can reply directly from there.
+${responseAnalysis ? "\n\nSuggested response available in the viewer." : ""}
     `.trim();
     
     return { type: 'email-view', response: formattedEmail };
@@ -184,7 +255,6 @@ async function updateDraftEmail(prompt, previousContext = null) {
     };
   }
   
-  // Check if this is a follow-up request to improve the email
   const isImproveRequest = prompt.toLowerCase().includes('make it more') || 
                           prompt.toLowerCase().includes('improve') || 
                           prompt.toLowerCase().includes('change the tone') ||
@@ -194,7 +264,6 @@ async function updateDraftEmail(prompt, previousContext = null) {
   
   if (isImproveRequest || previousContext) {
     try {
-      // Use Gemini to improve the draft based on the prompt
       const axios = require('axios');
       const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
       
@@ -313,16 +382,16 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
       const isValid = await emailFunctions.validateEmailAuth();
       if (!isValid) {
         console.log('[email-handlers] Email auth not valid, triggering re-auth');
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('../utils/authHelper');
         await clearTokensAndAuth('shifted-google-email', shell);
         return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
       }
     } catch (err) {
       console.error('[email-handlers] Error validating email auth:', err);
-      const { isAuthError } = require('./authHelper');
+      const { isAuthError } = require('../utils/authHelper');
       if (isAuthError(err)) {
         console.log('[email-handlers] Auth error detected, triggering re-auth');
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('../utils/authHelper');
         await clearTokensAndAuth('shifted-google-email', shell);
       }
       return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
@@ -331,7 +400,7 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
     await emailFunctions.ensureEmailAuth(win);
     const userEmail = await emailFunctions.getUserEmail();
     const auth = await emailFunctions.ensureEmailAuth();
-    const contacts = require('./contacts');
+    const contacts = require('../utils/contacts');
     
     let recipient = '';
     const toMatch = originalPrompt.match(/\b(?:to|for)\s+([^\s@]+@[^\s@]+\.[^\s@]+)/i);
@@ -436,7 +505,6 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
       }
     }
     
-    // Format the email professionally
     const { formatEmailProfessionally } = require('./emailFormatter');
     const formattedEmail = await formatEmailProfessionally(subject, body);
     
@@ -484,7 +552,6 @@ async function sendCurrentDraft(emailFunctions) {
       return { type: 'error', error: 'Draft email is missing recipient' };
     }
     
-    // Generate subject if missing
     if (!currentDraft.subject) {
       try {
         const axios = require('axios');

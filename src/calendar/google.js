@@ -62,7 +62,7 @@ async function ensureAuth(win) {
       console.error('[google] No valid access token');
       
       if (win) {
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('../utils/authHelper');
         await clearTokensAndAuth('shifted-google-calendar', shell);
       }
       
@@ -90,7 +90,7 @@ async function ensureAuth(win) {
         console.error('[google] Failed to refresh token:', err);
         
         if (win) {
-          const { clearTokensAndAuth } = require('./authHelper');
+          const { clearTokensAndAuth } = require('../utils/authHelper');
           await clearTokensAndAuth('shifted-google-calendar', shell);
         }
         
@@ -112,10 +112,10 @@ async function ensureAuth(win) {
     } catch (err) {
       console.error('[google] Auth test failed:', err);
       
-      const { isAuthError } = require('./authHelper');
+      const { isAuthError } = require('../utils/authHelper');
       if (isAuthError(err) && win) {
         console.log('[google] Auth error detected, triggering re-auth');
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('../utils/authHelper');
         await clearTokensAndAuth('shifted-google-calendar', shell);
         throw new Error('auth required');
       }
@@ -340,7 +340,7 @@ async function validateAndRefreshAuth() {
     catch (err) {
       console.error('[google] API test failed:', err);
       
-      const { isAuthError } = require('./authHelper');
+      const { isAuthError } = require('../utils/authHelper');
       if (isAuthError(err)) {
         console.log('[google] Auth error detected, tokens may be invalid');
         return false;

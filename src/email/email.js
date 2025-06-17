@@ -71,7 +71,7 @@ async function ensureEmailAuth(win) {
       console.error('[email] No valid access token');
       
       if (win) {
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('../utils/authHelper');
         await clearTokensAndAuth('shifted-google-email', shell);
       }
       
@@ -106,7 +106,7 @@ async function ensureEmailAuth(win) {
         console.error('[email] Failed to refresh token:', err);
         
         if (win) {
-          const { clearTokensAndAuth } = require('./authHelper');
+          const { clearTokensAndAuth } = require('../utils/authHelper');
           await clearTokensAndAuth('shifted-google-email', shell);
         }
         
@@ -122,10 +122,10 @@ async function ensureEmailAuth(win) {
     } catch (err) {
       console.error('[email] Auth test failed:', err);
       
-      const { isAuthError } = require('./authHelper');
+      const { isAuthError } = require('../utils/authHelper');
       if (isAuthError(err) && win) {
         console.log('[email] Auth error detected, triggering re-auth');
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('../utils/authHelper');
         await clearTokensAndAuth('shifted-google-email', shell);
         throw new Error('auth required');
       }
@@ -215,7 +215,7 @@ async function handleEmailOAuthCallback(code) {
   }
 }
 
-async function getUnreadEmails(maxResults = 10) {
+async function getUnreadEmails(maxResults = 50) {
   try {
     console.log('[email] Getting unread emails, max:', maxResults);
     
@@ -224,12 +224,21 @@ async function getUnreadEmails(maxResults = 10) {
     
     const gmail = google.gmail({ version: 'v1', auth });
     
-    // get unread
+    const countRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'is:unread in:inbox',
+      maxResults: 1
+    });
+    
+    const totalUnread = countRes.data.resultSizeEstimate;
+    console.log('[email] Total unread count:', totalUnread);
+    
     console.log('[email] Listing unread messages');
     const res = await gmail.users.messages.list({
       userId: 'me',
       q: 'is:unread in:inbox',
-      maxResults
+      maxResults: maxResults,
+      orderBy: 'internalDate desc'
     });
     
     console.log('[email] Messages list response received');
@@ -290,7 +299,8 @@ async function getUnreadEmails(maxResults = 10) {
     
     return { 
       emails,
-      count: res.data.resultSizeEstimate || emails.length
+      count: totalUnread || res.data.resultSizeEstimate || emails.length,
+      displayCount: emails.length
     };
   } catch (err) {
     console.error('[email] Error getting unread emails:', err);
@@ -316,21 +326,33 @@ async function getEmailContent(messageId) {
     const to = headers.find(h => h.name === 'To')?.value || '';
     const date = headers.find(h => h.name === 'Date')?.value || '';
     let body = '';
+    let htmlBody = '';
     
-    function getBody(part) {
+    function findBodyParts(part, results = { plain: '', html: '' }) {
       if (part.mimeType === 'text/plain' && part.body.data) {
-        return Buffer.from(part.body.data, 'base64').toString('utf8');
+        results.plain += Buffer.from(part.body.data, 'base64').toString('utf8');
+      } else if (part.mimeType === 'text/html' && part.body.data) {
+        results.html += Buffer.from(part.body.data, 'base64').toString('utf8');
       } else if (part.parts) {
-        return part.parts.map(getBody).join('\n');
+        part.parts.forEach(subpart => findBodyParts(subpart, results));
       }
-      return '';
+      return results;
     }
+    
+    const bodyParts = { plain: '', html: '' };
     
     if (message.payload.body && message.payload.body.data) {
-      body = Buffer.from(message.payload.body.data, 'base64').toString('utf8');
+      if (message.payload.mimeType === 'text/html') {
+        bodyParts.html = Buffer.from(message.payload.body.data, 'base64').toString('utf8');
+      } else {
+        bodyParts.plain = Buffer.from(message.payload.body.data, 'base64').toString('utf8');
+      }
     } else if (message.payload.parts) {
-      body = getBody(message.payload);
+      findBodyParts(message.payload, bodyParts);
     }
+    
+    body = bodyParts.plain;
+    htmlBody = bodyParts.html;
     
     return {
       id: message.id,
@@ -340,7 +362,9 @@ async function getEmailContent(messageId) {
       to,
       date: new Date(date).toLocaleString(),
       body,
-      snippet: message.snippet
+      htmlBody: htmlBody || body, // Use plain text if no HTML
+      snippet: message.snippet,
+      raw: message // Include the raw message for debugging
     };
   } catch (err) {
     console.error('[email] Error getting email content:', err);
@@ -515,7 +539,7 @@ async function validateEmailAuth() {
       console.error('[email] API test failed:', err);
       
       // Check if this is an auth error
-      const { isAuthError } = require('./authHelper');
+      const { isAuthError } = require('../utils/authHelper');
       if (isAuthError(err)) {
         console.log('[email] Auth error detected, tokens may be invalid');
         return false;

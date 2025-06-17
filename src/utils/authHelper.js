@@ -33,7 +33,7 @@ async function clearTokensAndAuth(service, shell) {
     await keytar.deletePassword(service, account);
     
     if (service === 'shifted-google-calendar') {
-      const { getAuthUrl } = require('./google');
+      const { getAuthUrl } = require('../calendar/google');
       const authUrl = await getAuthUrl();
       if (shell) {
         shell.openExternal(authUrl);
@@ -41,7 +41,7 @@ async function clearTokensAndAuth(service, shell) {
       }
     } 
     else if (service === 'shifted-google-email') {
-      const { getEmailAuthUrl } = require('./email');
+      const { getEmailAuthUrl } = require('../email/email');
       const authUrl = await getEmailAuthUrl();
       if (shell) {
         shell.openExternal(authUrl);

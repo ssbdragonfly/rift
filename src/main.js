@@ -1,11 +1,11 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
 const path = require('path');
 const isDev = !app.isPackaged;
-const { createEvent, ensureAuth, getAuthUrl, handleOAuthCallback, deleteEvent } = require('./google');
-const { parseEvent } = require('./parser');
+const { createEvent, ensureAuth, getAuthUrl, handleOAuthCallback, deleteEvent } = require('./calendar/google');
+const { parseEvent } = require('./calendar/parser');
 const { google } = require('googleapis');
-const emailFunctions = require('./email');
-const emailHandlers = require('./email-handlers');
+const emailFunctions = require('./email/email');
+const emailHandlers = require('./email/email-handlers');
 
 let win;
 
@@ -19,12 +19,12 @@ function createWindow() {
     skipTaskbar: true,
     transparent: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'utils/preload.js'),
       nodeIntegration: false,
       contextIsolation: true
     }
   });
-  win.loadFile('index.html');
+  win.loadFile(path.join(__dirname, 'ui/index.html'));
   win.hide();
 }
 
@@ -34,12 +34,12 @@ app.whenReady().then(async () => {
   try {
     console.log('[main] Checking Google API key:', process.env.GOOGLE_API_KEY ? 'Present' : 'Missing');
     
-    const { validateAndRefreshAuth, getAuthUrl } = require('./google');
+    const { validateAndRefreshAuth, getAuthUrl } = require('./calendar/google');
     const isValid = await validateAndRefreshAuth();
     if (!isValid) {
       console.log('[main] Auth validation failed, will prompt for re-auth when needed');
       try {
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('./utils/authHelper');
         await clearTokensAndAuth('shifted-google-calendar', shell);
         console.log('[main] Cleared stored credentials and triggered re-auth');
       } catch (e) {
@@ -51,11 +51,11 @@ app.whenReady().then(async () => {
     }
     
     try {
-      const { validateEmailAuth, getEmailAuthUrl } = require('./email');
+      const { validateEmailAuth, getEmailAuthUrl } = require('./email/email');
       const isEmailValid = await validateEmailAuth();
       if (!isEmailValid) {
         console.log('[main] Email auth validation failed, will prompt for re-auth when needed');
-        const { clearTokensAndAuth } = require('./authHelper');
+        const { clearTokensAndAuth } = require('./utils/authHelper');
         await clearTokensAndAuth('shifted-google-email', shell);
       }
     } catch (e) {
@@ -114,7 +114,7 @@ function extractDateFromPrompt(prompt) {
 
 async function queryCalendar(prompt) {
   try {
-    const { ensureAuth } = require('./google');
+    const { ensureAuth } = require('./calendar/google');
     const auth = await ensureAuth(win);
     
     const calendar = google.calendar({ 
@@ -207,7 +207,7 @@ async function queryCalendar(prompt) {
   catch (err) {
     console.error('[main] Error querying calendar:', err);
     if (err.message === 'auth required') {
-      const { getAuthUrl } = require('./google');
+      const { getAuthUrl } = require('./calendar/google');
       const authUrl = await getAuthUrl();
       shell.openExternal(authUrl);
       return 'Authentication required. Please check your browser to complete the sign-in process.';
@@ -219,8 +219,8 @@ async function queryCalendar(prompt) {
 
 async function deleteEventByPrompt(prompt) {
   try {
-    const { ensureAuth, deleteEvent } = require('./google');
-    const { identifyEventToDelete } = require('./deleteHelper');
+    const { ensureAuth, deleteEvent } = require('./calendar/google');
+    const { identifyEventToDelete } = require('./calendar/deleteHelper');
     const auth = await ensureAuth(win);
     const calendar = google.calendar({ 
       version: 'v3', 
@@ -268,7 +268,7 @@ async function deleteEventByPrompt(prompt) {
   catch (err) {
     console.error('[main] Error deleting event:', err);
     if (err.message === 'auth required') {
-      const { getAuthUrl } = require('./google');
+      const { getAuthUrl } = require('./calendar/google');
       const authUrl = await getAuthUrl();
       shell.openExternal(authUrl);
       return 'Authentication required. Please check your browser to complete the sign-in process.';
@@ -278,6 +278,9 @@ async function deleteEventByPrompt(prompt) {
 }
 
 function setupEmailHandlers() {
+  const emailViewer = require('./email/emailViewer');
+  emailViewer.setupEmailViewerHandlers(emailFunctions);
+  
   try {
     ipcMain.removeHandler('start-email-auth');
   } catch (e) {}
@@ -422,18 +425,63 @@ function setupEmailHandlers() {
 
 ipcMain.handle('route-prompt', async (event, prompt) => {
   try {
-    const { ensureAuth, getAuthUrl, createEvent, validateAndRefreshAuth } = require('./google');
-    const { detectIntent } = require('./intentDetector');
+    const { ensureAuth, getAuthUrl, createEvent, validateAndRefreshAuth } = require('./calendar/google');
+    const { detectIntent } = require('./utils/intentDetector');
     
     const intent = await detectIntent(prompt);
     console.log(`[main] Detected intent: ${intent} for prompt: "${prompt}"`);
     
-    if (intent === 'EMAIL_QUERY' || intent === 'EMAIL_VIEW') {
-      if (emailHandlers.isEmailViewRequest(prompt)) {
-        return await emailHandlers.handleEmailViewRequest(prompt, emailFunctions, shell, win);
-      } else {
-        return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
+    if (global.lastEmailSearchResults && /\b(open|view|show|read)\s+(email|mail|message)\s+#?(\d+)\b/i.test(prompt)) {
+      const match = prompt.match(/\b(open|view|show|read)\s+(email|mail|message)\s+#?(\d+)\b/i);
+      if (match) {
+        const emailNumber = parseInt(match[3]);
+        if (emailNumber > 0 && emailNumber <= global.lastEmailSearchResults.length) {
+          const email = global.lastEmailSearchResults[emailNumber - 1];
+          const emailContent = await emailFunctions.getEmailContent(email.id);
+          
+          let responseAnalysis = '';
+          try {
+            const analysis = await emailFunctions.analyzeEmailForResponse(emailContent);
+            if (analysis) {
+              emailContent.suggestedResponse = analysis;
+            }
+          } catch (err) {
+            console.error('[main] Error analyzing email for response:', err);
+          }
+          
+          const emailViewer = require('./email/emailViewer');
+          emailViewer.showEmail(emailContent);
+          
+          global.lastEmailSearchResults = null;
+          global.lastEmailSearchPrompt = null;
+          
+          const formattedEmail = `
+Subject: ${emailContent.subject}
+From: ${emailContent.from}
+To: ${emailContent.to}
+Date: ${emailContent.date}
+
+Email opened in viewer window. You can reply directly from there.
+${emailContent.suggestedResponse ? "\n\nSuggested response available in the viewer." : ""}
+          `.trim();
+          
+          return { 
+            type: 'email-view', 
+            response: formattedEmail,
+            followUpMode: true,
+            followUpType: 'email-view'
+          };
+        }
       }
+    }
+    
+    if (intent === 'EMAIL_VIEW') {
+      const { handleEmailViewRequest } = require('./email/emailViewHandler');
+      return await handleEmailViewRequest(prompt, emailFunctions, shell, win);
+    }
+    
+    if (intent === 'EMAIL_QUERY') {
+      return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
     }
     
     if (intent === 'EMAIL_DRAFT') {
@@ -472,7 +520,7 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
     
     if (intent === 'CALENDAR_MODIFY') {
       try {
-        const calendarModifier = require('./calendarModifier');
+        const calendarModifier = require('./calendar/calendarModifier');
         const auth = await ensureAuth(win);
         const result = await calendarModifier.handleEventModification(prompt, auth);
         

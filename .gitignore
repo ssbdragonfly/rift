@@ -3,8 +3,7 @@
 
 # Environment variables
 .env
-test.js
-
+README.md
 # Node modules
 node_modules/
 

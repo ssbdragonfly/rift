@@ -13,12 +13,15 @@ async function detectIntent(prompt) {
     
     Respond with ONLY ONE of these categories:
     - EMAIL_DRAFT: If the user wants to create, compose, or send an email
-    - EMAIL_QUERY: If the user wants to check, view, or list emails
+    - EMAIL_VIEW: If the user wants to view a specific email (e.g., "show me the Wall Street Journal email", "open the email from Amazon", "show me emails about meeting", "open email #2")
+    - EMAIL_QUERY: If the user wants to check, view, or list emails in general (e.g., "do I have any unread emails")
     - CALENDAR_CREATE: If the user wants to create or add a calendar event
     - CALENDAR_QUERY: If the user wants to check or view calendar events
     - CALENDAR_MODIFY: If the user wants to modify, update, or change a calendar event
     - CALENDAR_DELETE: If the user wants to delete or remove a calendar event
     - CHAT: If the request doesn't fit any of the above categories
+    
+    Be smart about detecting EMAIL_VIEW intents. If the user mentions a specific email source (like "Wall Street Journal", "Amazon", "helpbnk") or topic, or uses a number reference, classify it as EMAIL_VIEW, not EMAIL_QUERY.
     
     Respond with ONLY the category name, nothing else.
     `;
