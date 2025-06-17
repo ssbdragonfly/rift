@@ -91,7 +91,7 @@ From: ${emailContent.from}
 To: ${emailContent.to}
 Date: ${emailContent.date}
 
-Email opened in viewer window. You can reply directly from there.
+Email opened in viewer window. Please reply/read the email directly from there.
 ${responseAnalysis ? "\n\nSuggested response available in the viewer." : ""}
     `.trim();
 

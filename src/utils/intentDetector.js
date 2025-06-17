@@ -24,6 +24,10 @@ async function detectIntent(prompt) {
     Be smart about detecting EMAIL_VIEW intents. If the user mentions a specific email source (like "Wall Street Journal", "Amazon", "helpbnk") or topic, or uses a number reference, classify it as EMAIL_VIEW, not EMAIL_QUERY.
     
     Respond with ONLY the category name, nothing else.
+    Do not include any other text in your response.
+    Example:
+    Prompt: "Show me the Wall Street Journal email"
+    Response: EMAIL_VIEW
     `;
 
     const body = {

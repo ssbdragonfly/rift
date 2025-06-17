@@ -22,6 +22,9 @@ async function identifyEventToDelete(prompt, events) {
     ${eventsText}
     
     Respond with ONLY the number of the event to delete (e.g., "1" or "2"). If none match, respond with "none".
+    Example:
+    Prompt: Based on the user's request: "Delete the event on 10/15 at 2pm", Which of these events should be deleted? Event 1: "Meeting with John" on 10/15 at 2pm. Event 2: "Lunch with Sarah" on 10/15 at 1pm.
+    Response: "1"
     `;
 
     const body = {

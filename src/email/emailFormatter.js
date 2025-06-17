@@ -17,11 +17,15 @@ async function formatEmailProfessionally(subject, body, tone = 'professional') {
     Please provide a properly formatted email with:
     1. An appropriate subject line if none is provided or improve the existing one
     2. A professional greeting
-    3. Clear, concise body text that conveys the message
+    3. A clear, concise body text that conveys the message
     4. A professional closing (like "Sincerely," or "Best regards,")
     5. Tone should be: ${tone}
     
-    Return as JSON with "subject" and "body" fields.
+    Return as a single JSON with "subject" and "body" fields for example:
+    {
+      "subject": "Formatted Subject Line",
+      "body": "Formatted Body Text"
+    }
     `;
     
     const requestBody = {

@@ -73,7 +73,7 @@ async function findEmailsByIntent(auth, prompt) {
       Return a JSON array with the indices of the relevant emails (starting from 1).
       For example: [1, 3] means the 1st and 3rd emails are relevant.
       If no emails match, return an empty array: []
-      Only return the JSON array, nothing else.
+      Only return the JSON array, nothing else. Do not include any other text.
       `;
       
       const body = {

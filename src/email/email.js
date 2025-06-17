@@ -436,7 +436,7 @@ async function summarizeEmails(emails) {
     ).join('\n\n');
     
     const prompt = `
-    Summarize these unread emails in a concise, helpful way. Focus on the most important information:
+    Summarize these unread emails in a concise, precise helpful way. Focus on the key points of the emails.:
     ${emailsText}
     
     For each email, provide a one-line summary that captures the key information.
@@ -475,7 +475,7 @@ async function analyzeEmailForResponse(emailContent) {
     
     ${emailContent.body}
     
-    Provide a draft response that is professional and addresses the key points in the email.
+    Provide a draft response that matches the tone of the email and addresses the key points in the email.
     `;
     
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;

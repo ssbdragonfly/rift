@@ -277,6 +277,13 @@ async function updateDraftEmail(prompt, previousContext = null) {
       
       Please provide an improved version with the same basic information but addressing the request.
       Format your response as a JSON object with "subject" and "body" fields only.
+      Example:
+      {
+        "subject": "Improved Subject",
+        "body": "Improved body text"
+      }
+
+      Please do not include any additional information or explanations.
       `;
       
       const body = {
