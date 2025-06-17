@@ -53,7 +53,12 @@ async function isEmailViewRequest(prompt) {
       `;
       
       const body = {
-        contents: [{ parts: [{ text: geminiPrompt }] }]
+        contents: [{ parts: [{ text: geminiPrompt }] }],
+        generationConfig: {
+          temperature: 0.0,
+          topP: 1.0,
+          topK: 1
+        }
       };
       
       const resp = await axios.post(url, body, { timeout: 5000 });
@@ -287,7 +292,12 @@ async function updateDraftEmail(prompt, previousContext = null) {
       `;
       
       const body = {
-        contents: [{ parts: [{ text: geminiPrompt }] }]
+        contents: [{ parts: [{ text: geminiPrompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          topK: 40
+        }
       };
       
       const resp = await axios.post(url, body, { timeout: 10000 });
@@ -472,7 +482,12 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
         `;
         
         const body = {
-          contents: [{ parts: [{ text: geminiPrompt }] }]
+          contents: [{ parts: [{ text: geminiPrompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            topP: 0.95,
+            topK: 40
+          }
         };
         
         const resp = await axios.post(url, body, { timeout: 10000 });
@@ -573,7 +588,12 @@ async function sendCurrentDraft(emailFunctions) {
         `;
         
         const body = {
-          contents: [{ parts: [{ text: prompt }] }]
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.3,
+            topP: 0.9,
+            topK: 40
+          }
         };
         
         const resp = await axios.post(url, body, { timeout: 5000 });

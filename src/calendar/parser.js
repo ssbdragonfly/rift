@@ -79,7 +79,12 @@ Now, extract the event from this input:
 Output:
 `;
       const body = {
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.95,
+          topK: 40
+        }
       };
       console.log('[parser] Sending request to Gemini API...');
       const resp = await axios.post(url, body, { timeout: 10000 });

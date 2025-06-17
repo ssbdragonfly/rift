@@ -77,7 +77,12 @@ async function findEmailsByIntent(auth, prompt) {
       `;
       
       const body = {
-        contents: [{ parts: [{ text: geminiPrompt }] }]
+        contents: [{ parts: [{ text: geminiPrompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.9,
+          topK: 40
+        }
       };
       
       const resp = await axios.post(url, body, { timeout: 10000 });

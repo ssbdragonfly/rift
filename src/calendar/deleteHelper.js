@@ -28,7 +28,12 @@ async function identifyEventToDelete(prompt, events) {
     `;
 
     const body = {
-      contents: [{ parts: [{ text: geminiPrompt }] }]
+      contents: [{ parts: [{ text: geminiPrompt }] }],
+      generationConfig: {
+        temperature: 0.0,
+        topP: 1.0,
+        topK: 1
+      }
     };
     
     const resp = await axios.post(url, body, { timeout: 5000 });

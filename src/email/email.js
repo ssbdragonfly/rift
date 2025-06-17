@@ -444,7 +444,12 @@ async function summarizeEmails(emails) {
     
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
     const body = {
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        topP: 0.95,
+        topK: 40
+      }
     };
     
     const resp = await axios.post(url, body, { timeout: 10000 });
@@ -480,7 +485,12 @@ async function analyzeEmailForResponse(emailContent) {
     
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
     const body = {
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        topP: 0.8,
+        topK: 40
+      }
     };
     
     const resp = await axios.post(url, body, { timeout: 10000 });

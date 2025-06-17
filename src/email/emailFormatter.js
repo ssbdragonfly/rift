@@ -29,7 +29,12 @@ async function formatEmailProfessionally(subject, body, tone = 'professional') {
     `;
     
     const requestBody = {
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.4,
+        topP: 0.95,
+        topK: 40
+      }
     };
     
     const response = await axios.post(url, requestBody, { timeout: 10000 });

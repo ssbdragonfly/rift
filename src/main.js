@@ -184,7 +184,12 @@ async function queryCalendar(prompt) {
         `;
         
         const body = {
-          contents: [{ parts: [{ text: geminiPrompt }] }]
+          contents: [{ parts: [{ text: geminiPrompt }] }],
+          generationConfig: {
+            temperature: 0.3,
+            topP: 0.95,
+            topK: 40
+          }
         };
         
         const resp = await axios.post(url, body, { timeout: 5000 });
