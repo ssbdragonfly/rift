@@ -19,22 +19,21 @@ function getPromptHistory(count = 2) {
 }
 
 function isEmailQuery(prompt) {
-  const isQuery = /\b(email|emails|mail|inbox|unread|message|messages)\b/i.test(prompt) && 
-                 (/\b(show|list|get|check|view|read|any|new|unread|recent)\b/i.test(prompt) || 
-                  prompt.toLowerCase().includes('unread email'));
+  const isQuery = /\b(email|emails|mail|inbox|unread|message|messages)\b/i.test(prompt) && (/\b(show|list|get|check|view|read|any|new|unread|recent)\b/i.test(prompt) || prompt.toLowerCase().includes('unread email'));
   
   console.log('[email-handlers] isEmailQuery check:', prompt, '->', isQuery);
   return isQuery;
 }
 
 function isEmailViewRequest(prompt) {
-  return /\b(view|read|open|show)\s+(email|mail|message)\b/i.test(prompt) && 
-         /\b(id|number|#)\b/i.test(prompt);
+  return /\b(view|read|open|show)\s+(email|mail|message)\b/i.test(prompt) && /\b(id|number|#)\b/i.test(prompt);
 }
 
 function isEmailDraftRequest(prompt) {
   return /\b(draft|write|compose|create|send)\s+(email|mail|message)\b/i.test(prompt) ||
-         /\b(email|mail|message)\s+(to|for)\b/i.test(prompt);
+         /\b(email|mail|message)\s+(to|for)\b/i.test(prompt) ||
+         /\b(draft|write|compose|create|send).+\b(to|for)\s+[^\s@]+@[^\s@]+\.[^\s@]+/i.test(prompt) ||
+         /\b(email|mail|message)\s+([a-z]+)\b/i.test(prompt); // Simple pattern to catch "email bob"
 }
 
 async function handleEmailQuery(prompt, emailFunctions, shell, win) {
@@ -174,16 +173,72 @@ ${emailContent.body}${responseAnalysis}
 }
 
 function isEmailEditRequest(prompt) {
-  return /\b(edit|update|change|modify)\s+(email|draft|message)\b/i.test(prompt) ||
-         /\b(add|change|update|set)\s+(recipient|to|subject|body|content)\b/i.test(prompt);
+  return /\b(edit|update|change|modify)\s+(email|draft|message)\b/i.test(prompt) ||/\b(add|change|update|set)\s+(recipient|to|subject|body|content)\b/i.test(prompt);
 }
 
-async function updateDraftEmail(prompt) {
+async function updateDraftEmail(prompt, previousContext = null) {
   if (!currentDraft) {
     return { 
       type: 'error', 
       error: 'No draft email to edit. Create a draft first with "write an email to someone@example.com"' 
     };
+  }
+  
+  // Check if this is a follow-up request to improve the email
+  const isImproveRequest = prompt.toLowerCase().includes('make it more') || 
+                          prompt.toLowerCase().includes('improve') || 
+                          prompt.toLowerCase().includes('change the tone') ||
+                          prompt.toLowerCase().includes('professional') ||
+                          prompt.toLowerCase().includes('formal') ||
+                          prompt.toLowerCase().includes('friendly');
+  
+  if (isImproveRequest || previousContext) {
+    try {
+      // Use Gemini to improve the draft based on the prompt
+      const axios = require('axios');
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
+      
+      const geminiPrompt = `
+      I have an email draft that I want to improve based on this request: "${prompt}"
+      
+      Current draft:
+      To: ${currentDraft.to || '[No recipient specified]'}
+      Subject: ${currentDraft.subject || '[No subject specified]'}
+      Body: ${currentDraft.body || '[No body specified]'}
+      
+      Please provide an improved version with the same basic information but addressing the request.
+      Format your response as a JSON object with "subject" and "body" fields only.
+      `;
+      
+      const body = {
+        contents: [{ parts: [{ text: geminiPrompt }] }]
+      };
+      
+      const resp = await axios.post(url, body, { timeout: 10000 });
+      const text = resp.data.candidates[0].content.parts[0].text;
+      
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const improvedDraft = JSON.parse(jsonMatch[0]);
+        if (improvedDraft.subject) currentDraft.subject = improvedDraft.subject;
+        if (improvedDraft.body) currentDraft.body = improvedDraft.body;
+        
+        let response = '**Email draft improved.** Press Cmd+Y to send it.\n\n';
+        response += `**From:** ${currentDraft.from}\n`;
+        response += `**To:** ${currentDraft.to || '[Please specify recipient]'}\n`;
+        response += `**Subject:** ${currentDraft.subject || '[Please specify subject]'}\n\n`;
+        response += currentDraft.body || '[Please specify email content]';
+        
+        return { 
+          type: 'email-draft', 
+          response, 
+          draft: currentDraft,
+          showSendButton: true
+        };
+      }
+    } catch (err) {
+      console.error('[email-handlers] Error improving draft:', err);
+    }
   }
   
   const toMatch = prompt.match(/\b(?:to|recipient|address)\s+([^\s@]+@[^\s@]+\.[^\s@]+)/i);
@@ -227,25 +282,75 @@ async function updateDraftEmail(prompt) {
 
 async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
   try {
-    if (currentDraft && isEmailEditRequest(prompt)) {
-      return await updateDraftEmail(prompt);
+    let originalPrompt = prompt;
+    let previousContext = null;
+    
+    if (prompt.startsWith('FOLLOW_UP_CONTEXT:')) {
+      const parts = prompt.split('NEW_PROMPT:');
+      if (parts.length >= 2) {
+        const contextParts = parts[0].split('PREVIOUS_RESPONSE:');
+        const contextPrompt = contextParts[0].replace('FOLLOW_UP_CONTEXT:', '').trim();
+        const previousResponse = contextParts.length > 1 ? contextParts[1].trim() : '';
+        const newPrompt = parts[1].trim();
+        
+        console.log('[email-handlers] Processing follow-up. Original prompt:', contextPrompt);
+        console.log('[email-handlers] New prompt:', newPrompt);
+        
+        previousContext = {
+          prompt: contextPrompt,
+          response: previousResponse
+        };
+        
+        originalPrompt = newPrompt;
+      }
     }
     
-    const isValid = await emailFunctions.validateEmailAuth();
-    if (!isValid) {
-      const authUrl = await emailFunctions.getEmailAuthUrl();
-      shell.openExternal(authUrl);
+    if (currentDraft && (isEmailEditRequest(originalPrompt) || previousContext)) {
+      return await updateDraftEmail(originalPrompt, previousContext);
+    }
+    
+    try {
+      const isValid = await emailFunctions.validateEmailAuth();
+      if (!isValid) {
+        console.log('[email-handlers] Email auth not valid, triggering re-auth');
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-email', shell);
+        return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
+      }
+    } catch (err) {
+      console.error('[email-handlers] Error validating email auth:', err);
+      const { isAuthError } = require('./authHelper');
+      if (isAuthError(err)) {
+        console.log('[email-handlers] Auth error detected, triggering re-auth');
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-email', shell);
+      }
       return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
     }
     
     await emailFunctions.ensureEmailAuth(win);
     const userEmail = await emailFunctions.getUserEmail();
+    const auth = await emailFunctions.ensureEmailAuth();
+    const contacts = require('./contacts');
     
     let recipient = '';
-    const toMatch = prompt.match(/\b(?:to|for)\s+([^\s@]+@[^\s@]+\.[^\s@]+)/i);
+    const toMatch = originalPrompt.match(/\b(?:to|for)\s+([^\s@]+@[^\s@]+\.[^\s@]+)/i);
     if (toMatch) {
       recipient = toMatch[1];
+    } else {
+      const nameMatch = originalPrompt.match(/\b(?:email|mail|message|send|write\s+to)\s+([a-z]+)\b/i);
+      if (nameMatch) {
+        const contactName = nameMatch[1];
+        try {
+          recipient = await contacts.resolveContactToEmail(auth, contactName);
+          console.log(`[email-handlers] Resolved contact "${contactName}" to "${recipient}"`);
+        }
+        catch (err) {
+          console.error(`[email-handlers] Failed to resolve contact "${contactName}":`, err);
+        }
+      }
     }
+    
     let subject = '';
     const subjectMatch = prompt.match(/\b(?:subject|about|regarding|titled)\s+["']([^"']+)["']/i);
     if (subjectMatch) {
@@ -268,12 +373,78 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
       }
     }
     
-    // create draft
+    if (promptHistory.length > 0 && 
+        (prompt.toLowerCase().includes('make it more') || 
+         prompt.toLowerCase().includes('improve') || 
+         prompt.toLowerCase().includes('change the tone'))) {
+      
+      try {
+        const lastDraft = currentDraft || {};
+        const axios = require('axios');
+        const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
+        
+        const geminiPrompt = `
+        I have an email draft that I want to improve based on this request: "${prompt}"
+        
+        Current draft:
+        To: ${lastDraft.to || '[No recipient specified]'}
+        Subject: ${lastDraft.subject || '[No subject specified]'}
+        Body: ${lastDraft.body || '[No body specified]'}
+        
+        Please provide an improved version with the same basic information but addressing the request.
+        Format your response as a JSON object with "subject" and "body" fields only.
+        `;
+        
+        const body = {
+          contents: [{ parts: [{ text: geminiPrompt }] }]
+        };
+        
+        const resp = await axios.post(url, body, { timeout: 10000 });
+        const text = resp.data.candidates[0].content.parts[0].text;
+        
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const improvedDraft = JSON.parse(jsonMatch[0]);
+          if (improvedDraft.subject) lastDraft.subject = improvedDraft.subject;
+          if (improvedDraft.body) lastDraft.body = improvedDraft.body;
+          
+          const draft = {
+            from: userEmail,
+            to: lastDraft.to || recipient || '',
+            subject: lastDraft.subject || subject || '',
+            body: lastDraft.body || body || ''
+          };
+          
+          currentDraft = draft;
+          
+          let response = '**Email draft improved.** Press Cmd+Y to send it.\n\n';
+          response += `**From:** ${draft.from}\n`;
+          response += `**To:** ${draft.to || '[Please specify recipient]'}\n`;
+          response += `**Subject:** ${draft.subject || '[Please specify subject]'}\n\n`;
+          response += draft.body || '[Please specify email content]';
+          
+          return { 
+            type: 'email-draft', 
+            response, 
+            draft,
+            showSendButton: true
+          };
+        }
+      }
+      catch (err) {
+        console.error('[email-handlers] Error improving draft:', err);
+      }
+    }
+    
+    // Format the email professionally
+    const { formatEmailProfessionally } = require('./emailFormatter');
+    const formattedEmail = await formatEmailProfessionally(subject, body);
+    
     const draft = {
       from: userEmail,
       to: recipient || '',
-      subject: subject || '',
-      body: body || ''
+      subject: formattedEmail.subject || subject || '',
+      body: formattedEmail.body || body || ''
     };
     
     currentDraft = draft;
@@ -313,8 +484,36 @@ async function sendCurrentDraft(emailFunctions) {
       return { type: 'error', error: 'Draft email is missing recipient' };
     }
     
+    // Generate subject if missing
     if (!currentDraft.subject) {
-      return { type: 'error', error: 'Draft email is missing subject' };
+      try {
+        const axios = require('axios');
+        const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
+        
+        const prompt = `
+        Generate a concise, professional subject line for this email:
+        
+        ${currentDraft.body}
+        
+        Respond with ONLY the subject line text, nothing else.
+        `;
+        
+        const body = {
+          contents: [{ parts: [{ text: prompt }] }]
+        };
+        
+        const resp = await axios.post(url, body, { timeout: 5000 });
+        const subject = resp.data.candidates[0].content.parts[0].text.trim();
+        
+        if (subject) {
+          currentDraft.subject = subject;
+        } else {
+          return { type: 'error', error: 'Draft email is missing subject' };
+        }
+      } catch (err) {
+        console.error('[email-handlers] Error generating subject:', err);
+        return { type: 'error', error: 'Draft email is missing subject' };
+      }
     }
     
     if (!currentDraft.body || currentDraft.body.trim() === '') {
@@ -340,8 +539,9 @@ async function sendCurrentDraft(emailFunctions) {
 }
 
 module.exports = {
-  currentDraft,
-  promptHistory,
+  get currentDraft() { return currentDraft; },
+  set currentDraft(value) { currentDraft = value; },
+  get promptHistory() { return promptHistory; },
   storePromptInHistory,
   getPromptHistory,
   isEmailQuery,

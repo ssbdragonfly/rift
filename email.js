@@ -4,6 +4,7 @@ const keytar = require('keytar');
 const os = require('os');
 const express = require('express');
 const axios = require('axios');
+const { shell } = require('electron');
 
 const SERVICE = 'shifted-google-email';
 const ACCOUNT = os.userInfo().username;
@@ -68,6 +69,12 @@ async function ensureEmailAuth(win) {
     let tokens = await getStoredEmailTokens();
     if (!tokens || !tokens.access_token) {
       console.error('[email] No valid access token');
+      
+      if (win) {
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-email', shell);
+      }
+      
       throw new Error('auth required');
     }
     
@@ -97,11 +104,33 @@ async function ensureEmailAuth(win) {
         console.log('[email] Token refreshed successfully');
       } catch (err) {
         console.error('[email] Failed to refresh token:', err);
+        
+        if (win) {
+          const { clearTokensAndAuth } = require('./authHelper');
+          await clearTokensAndAuth('shifted-google-email', shell);
+        }
+        
         throw new Error('auth required');
       }
     }
     
     emailOAuth2Client.apiKey = process.env.GOOGLE_API_KEY;
+    
+    try {
+      const gmail = google.gmail({ version: 'v1', auth: emailOAuth2Client });
+      await gmail.users.getProfile({ userId: 'me' });
+    } catch (err) {
+      console.error('[email] Auth test failed:', err);
+      
+      const { isAuthError } = require('./authHelper');
+      if (isAuthError(err) && win) {
+        console.log('[email] Auth error detected, triggering re-auth');
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-email', shell);
+        throw new Error('auth required');
+      }
+      
+    }
     
     return emailOAuth2Client;
   }
@@ -132,7 +161,8 @@ async function getEmailAuthUrl() {
         'https://www.googleapis.com/auth/gmail.readonly',
         'https://www.googleapis.com/auth/gmail.send',
         'https://www.googleapis.com/auth/gmail.compose',
-        'https://www.googleapis.com/auth/gmail.modify'
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/contacts.readonly'
       ]
     });
     
@@ -475,7 +505,25 @@ async function validateEmailAuth() {
       }
     }
     
-    return true;
+    // Test the auth with a simple API call
+    try {
+      const gmail = google.gmail({ version: 'v1', auth: emailOAuth2Client });
+      await gmail.users.getProfile({ userId: 'me' });
+      console.log('[email] API test successful');
+      return true;
+    } catch (err) {
+      console.error('[email] API test failed:', err);
+      
+      // Check if this is an auth error
+      const { isAuthError } = require('./authHelper');
+      if (isAuthError(err)) {
+        console.log('[email] Auth error detected, tokens may be invalid');
+        return false;
+      }
+      
+      // For non-auth errors, we might still have valid auth
+      return true;
+    }
   } catch (err) {
     console.error('[email] Error validating auth:', err);
     return false;

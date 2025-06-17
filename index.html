@@ -83,6 +83,25 @@
       border-radius: 8px;
       border-left: 3px solid #8c8cfa;
       animation: fadeIn 0.3s ease-in-out;
+      position: relative;
+    }
+    
+    #response.follow-up-mode {
+      border-left: 3px solid #ffa0a0;
+      background-color: rgba(50, 40, 50, 0.5);
+    }
+    
+    #response.follow-up-mode::before {
+      content: "Follow-up mode - Type to improve this draft";
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: rgba(255, 160, 160, 0.3);
+      color: #ffa0a0;
+      font-size: 0.8em;
+      padding: 4px 10px;
+      border-radius: 0 8px 0 8px;
+      font-weight: bold;
     }
     
     @keyframes fadeIn {
@@ -132,6 +151,8 @@
   <div id="bar-container">
     <div id="top-bar">
       <span class="keybind"><b>⌘⇧Space</b> Show/Hide</span>
+      <span class="keybind"><b>⌘⇧R</b> Reset</span>
+      <span class="keybind"><b>⌘⇧F</b> Follow-up</span>
       <span class="keybind"><b>⌘Y</b> Send Email</span>
     </div>
     <input id="input" type="text" placeholder="e.g. Meeting with Sarah every Monday at 9am" autofocus />

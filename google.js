@@ -3,6 +3,7 @@ const { google } = require('googleapis');
 const keytar = require('keytar');
 const os = require('os');
 const express = require('express');
+const { shell } = require('electron');
 const SERVICE = 'shifted-google-calendar';
 const ACCOUNT = os.userInfo().username;
 
@@ -59,6 +60,12 @@ async function ensureAuth(win) {
     let tokens = await getStoredTokens();
     if (!tokens || !tokens.access_token) {
       console.error('[google] No valid access token');
+      
+      if (win) {
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-calendar', shell);
+      }
+      
       throw new Error('auth required');
     }
     
@@ -81,12 +88,39 @@ async function ensureAuth(win) {
       }
       catch (err) {
         console.error('[google] Failed to refresh token:', err);
+        
+        if (win) {
+          const { clearTokensAndAuth } = require('./authHelper');
+          await clearTokensAndAuth('shifted-google-calendar', shell);
+        }
+        
         throw new Error('auth required');
       }
     }
     
     oauth2Client.setCredentials(tokens);
     oauth2Client.apiKey = process.env.GOOGLE_API_KEY;
+    
+    try {
+      const calendar = google.calendar({ 
+        version: 'v3', 
+        auth: oauth2Client,
+        key: process.env.GOOGLE_API_KEY
+      });
+      
+      await calendar.calendarList.list();
+    } catch (err) {
+      console.error('[google] Auth test failed:', err);
+      
+      const { isAuthError } = require('./authHelper');
+      if (isAuthError(err) && win) {
+        console.log('[google] Auth error detected, triggering re-auth');
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-calendar', shell);
+        throw new Error('auth required');
+      }
+      
+    }
     
     return oauth2Client;
   }
@@ -305,7 +339,14 @@ async function validateAndRefreshAuth() {
     }
     catch (err) {
       console.error('[google] API test failed:', err);
-      return false;
+      
+      const { isAuthError } = require('./authHelper');
+      if (isAuthError(err)) {
+        console.log('[google] Auth error detected, tokens may be invalid');
+        return false;
+      }
+      
+      return true;
     }
   }
   catch (err) {

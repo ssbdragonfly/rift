@@ -39,16 +39,27 @@ app.whenReady().then(async () => {
     if (!isValid) {
       console.log('[main] Auth validation failed, will prompt for re-auth when needed');
       try {
-        const keytar = require('keytar');
-        const os = require('os');
-        await keytar.deletePassword('shifted-google-calendar', os.userInfo().username);
-        console.log('[main] Cleared stored credentials');
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-calendar', shell);
+        console.log('[main] Cleared stored credentials and triggered re-auth');
       } catch (e) {
         console.error('[main] Failed to clear credentials:', e);
       }
     }
     else {
       console.log('[main] Auth validation successful');
+    }
+    
+    try {
+      const { validateEmailAuth, getEmailAuthUrl } = require('./email');
+      const isEmailValid = await validateEmailAuth();
+      if (!isEmailValid) {
+        console.log('[main] Email auth validation failed, will prompt for re-auth when needed');
+        const { clearTokensAndAuth } = require('./authHelper');
+        await clearTokensAndAuth('shifted-google-email', shell);
+      }
+    } catch (e) {
+      console.error('[main] Error checking email auth:', e);
     }
   }
   catch (err) {
@@ -70,7 +81,6 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', (e) => {
-  // Keep app running in background
 });
 
 function isCalendarQuery(prompt) {
@@ -80,6 +90,11 @@ function isCalendarQuery(prompt) {
 
 function isDeleteEvent(prompt) {
   return /\b(delete|remove|cancel)\b/i.test(prompt);
+}
+
+function isModifyEvent(prompt) {
+  return /\b(change|modify|update|edit|rename|reschedule|add|invite)\b/i.test(prompt) && 
+         /\b(event|meeting|appointment|calendar)\b/i.test(prompt);
 }
 
 function extractTitleForDelete(prompt) {
@@ -146,11 +161,47 @@ async function queryCalendar(prompt) {
     const events = eventsRes.data.items || [];
     if (events.length === 0) return 'No events found.';
     
+    if (process.env.GEMINI_API_KEY && events.length > 0) {
+      try {
+        const axios = require('axios');
+        const eventsText = events.map(ev => {
+          const start = ev.start.dateTime || ev.start.date;
+          const startDate = new Date(start);
+          const timeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+          const dateStr = startDate.toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'});
+          return `Event: ${ev.summary}, Date: ${dateStr}, Time: ${timeStr}, Location: ${ev.location || 'Not specified'}`;
+        }).join('\n');
+        
+        const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
+        const geminiPrompt = `
+        Based on the user's query: "${prompt}"
+        
+        Format these calendar events in a clear, organized way:
+        ${eventsText}
+        
+        Group by date if appropriate. Include all relevant details like time, date, and location.
+        Be concise but informative. Format the response to be easily readable.
+        `;
+        
+        const body = {
+          contents: [{ parts: [{ text: geminiPrompt }] }]
+        };
+        
+        const resp = await axios.post(url, body, { timeout: 5000 });
+        const text = resp.data.candidates[0].content.parts[0].text.trim();
+        return text;
+      }
+      catch (err) {
+        console.error('[main] Error using Gemini for calendar formatting:', err);
+      }
+    }
+    
     return events.map(ev => {
       const start = ev.start.dateTime || ev.start.date;
       const startDate = new Date(start);
       const timeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-      return `${timeStr}: ${ev.summary}`;
+      const dateStr = startDate.toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'});
+      return `${dateStr} at ${timeStr}: ${ev.summary}${ev.location ? ' ('+ev.location+')' : ''}`;
     }).join('\n');
   }
   catch (err) {
@@ -169,6 +220,7 @@ async function queryCalendar(prompt) {
 async function deleteEventByPrompt(prompt) {
   try {
     const { ensureAuth, deleteEvent } = require('./google');
+    const { identifyEventToDelete } = require('./deleteHelper');
     const auth = await ensureAuth(win);
     const calendar = google.calendar({ 
       version: 'v3', 
@@ -176,14 +228,9 @@ async function deleteEventByPrompt(prompt) {
       key: process.env.GOOGLE_API_KEY
     });
     
-    const title = extractTitleForDelete(prompt);
-    if (!title) throw new Error('Could not extract event title to delete.');
-    
-    console.log(`[main] Searching for event to delete with title: "${title}"`);
-    
     const now = new Date();
     const timeMin = now.toISOString();
-    const timeMax = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const timeMax = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
     
     const eventsRes = await calendar.events.list({
       calendarId: 'primary',
@@ -191,12 +238,27 @@ async function deleteEventByPrompt(prompt) {
       timeMax,
       singleEvents: true,
       orderBy: 'startTime',
-      maxResults: 20,
-      q: title
+      maxResults: 10
     });
     
     const events = eventsRes.data.items || [];
-    console.log(`[main] Found ${events.length} potential matching events`);
+    if (events.length === 0) throw new Error('No upcoming events found to delete.');
+    
+    console.log(`[main] Found ${events.length} upcoming events`);
+    
+    const geminiMatch = await identifyEventToDelete(prompt, events);
+    
+    if (geminiMatch) {
+      console.log(`[main] Gemini identified event to delete: ${geminiMatch.summary}`);
+      await deleteEvent(geminiMatch.id);
+      return `Deleted event: ${geminiMatch.summary}`;
+    }
+    
+    const title = extractTitleForDelete(prompt);
+    if (!title) throw new Error('Could not determine which event to delete. Please specify the event name.');
+    
+    console.log(`[main] Searching for event to delete with title: "${title}"`);
+    
     const match = events.find(ev => ev.summary && ev.summary.toLowerCase().includes(title.toLowerCase()));
     if (!match) throw new Error('No matching event found to delete.');
     
@@ -361,16 +423,20 @@ function setupEmailHandlers() {
 ipcMain.handle('route-prompt', async (event, prompt) => {
   try {
     const { ensureAuth, getAuthUrl, createEvent, validateAndRefreshAuth } = require('./google');
+    const { detectIntent } = require('./intentDetector');
     
-    if (emailHandlers.isEmailQuery(prompt)) {
-      return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
+    const intent = await detectIntent(prompt);
+    console.log(`[main] Detected intent: ${intent} for prompt: "${prompt}"`);
+    
+    if (intent === 'EMAIL_QUERY' || intent === 'EMAIL_VIEW') {
+      if (emailHandlers.isEmailViewRequest(prompt)) {
+        return await emailHandlers.handleEmailViewRequest(prompt, emailFunctions, shell, win);
+      } else {
+        return await emailHandlers.handleEmailQuery(prompt, emailFunctions, shell, win);
+      }
     }
     
-    if (emailHandlers.isEmailViewRequest(prompt)) {
-      return await emailHandlers.handleEmailViewRequest(prompt, emailFunctions, shell, win);
-    }
-    
-    if (emailHandlers.isEmailDraftRequest(prompt)) {
+    if (intent === 'EMAIL_DRAFT') {
       return await emailHandlers.handleEmailDraftRequest(prompt, emailFunctions, shell, win);
     }
     
@@ -394,7 +460,7 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
       return { type: 'error', error: `Authentication error: ${err.message}` };
     }
     
-    if (isDeleteEvent(prompt)) {
+    if (intent === 'CALENDAR_DELETE') {
       try {
         const response = await deleteEventByPrompt(prompt);
         return { type: 'delete', response };
@@ -404,7 +470,29 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
       }
     }
     
-    if (isCalendarQuery(prompt)) {
+    if (intent === 'CALENDAR_MODIFY') {
+      try {
+        const calendarModifier = require('./calendarModifier');
+        const auth = await ensureAuth(win);
+        const result = await calendarModifier.handleEventModification(prompt, auth);
+        
+        if (result.success) {
+          return { 
+            type: 'event-modified', 
+            success: true, 
+            result: result.event,
+            changes: result.changes
+          };
+        } else {
+          return { type: 'error', error: result.error };
+        }
+      } catch (err) {
+        console.error('[main] Event modification error:', err);
+        return { type: 'error', error: `Failed to modify event: ${err.message}` };
+      }
+    }
+    
+    if (intent === 'CALENDAR_QUERY') {
       try {
         const response = await queryCalendar(prompt);
         return { type: 'query', response };
@@ -414,28 +502,32 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
       }
     }
     
-    try {
-      const parsed = await parseEvent(prompt);
-      if (typeof parsed === 'string') {
-        return { type: 'chat', response: parsed };
+    if (intent === 'CALENDAR_CREATE') {
+      try {
+        const parsed = await parseEvent(prompt);
+        if (typeof parsed === 'string') {
+          return { type: 'chat', response: parsed };
+        }
+        
+        if (!parsed.start || !parsed.end) {
+          return { 
+            type: 'chat', 
+            response: `I understood you want to create an event titled "${parsed.title}", but I need more information about the date and time.` 
+          };
+        }
+        
+        const result = await createEvent(parsed);
+        return { type: 'event', success: true, result };
+      } catch (err) {
+        console.error('[main] Error in event creation:', err);
+        if (err.message && err.message.includes('auth')) {
+          return { type: 'error', error: 'Authentication issue: ' + err.message };
+        }
+        return { type: 'chat', response: 'I understood your request but encountered an issue: ' + err.message };
       }
-      
-      if (!parsed.start || !parsed.end) {
-        return { 
-          type: 'chat', 
-          response: `I understood you want to create an event titled "${parsed.title}", but I need more information about the date and time.` 
-        };
-      }
-      
-      const result = await createEvent(parsed);
-      return { type: 'event', success: true, result };
-    } catch (err) {
-      console.error('[main] Error in event creation:', err);
-      if (err.message && err.message.includes('auth')) {
-        return { type: 'error', error: 'Authentication issue: ' + err.message };
-      }
-      return { type: 'chat', response: 'I understood your request but encountered an issue: ' + err.message };
     }
+    
+    return { type: 'chat', response: 'I\'m not sure how to help with that. You can ask me about your calendar events, emails, or create new events and emails.' };
   } catch (err) {
     console.error('[main] Unhandled error in route-prompt:', err);
     return { type: 'error', error: err.message };

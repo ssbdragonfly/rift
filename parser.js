@@ -155,7 +155,6 @@ function toTitleCase(str) {
   if (!str){
     return str;
   }
-
   const smallWords = ['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in', 'nor', 'of', 'on', 'or', 'so', 'the', 'to', 'up', 'with'];
   return str.toLowerCase().replace(/\b\w+/g, function(word, index, full) {
       if((index === 0) || (index + word.length === full.length) || smallWords.indexOf(word) === -1) {
