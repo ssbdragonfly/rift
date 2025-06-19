@@ -73,7 +73,7 @@ function resizeWindowToFitContent() {
   const container = document.getElementById('bar-container');
   if (container) {
     const height = container.scrollHeight + 40;
-    window.shifted.resizeWindow(480, Math.max(300, height));
+    window.rift.resizeWindow(480, Math.max(300, height));
   }
 }
 
@@ -100,7 +100,7 @@ async function routePrompt() {
   }
   
   try {
-    const res = await window.shifted.routePrompt(effectivePrompt);
+    const res = await window.rift.routePrompt(effectivePrompt);
     console.log('Response received:', res);
     
     if (res.type === 'event') {
@@ -256,7 +256,7 @@ input.addEventListener('keydown', (e) => {
     e.preventDefault();
     routePrompt();
   }
-  if (e.key === 'Escape') window.shifted.hideWindow();
+  if (e.key === 'Escape') window.rift.hideWindow();
   
   // cmd shift r - Reset prompt and clear follow-up mode
   if (e.metaKey && e.shiftKey && e.key === 'R') {
@@ -298,9 +298,9 @@ input.addEventListener('keydown', (e) => {
     
     if (currentPrompt || currentResponse) {
       console.log('Storing prompt and response for follow-up');
-      window.shifted.storeHistory(currentPrompt, currentResponse)
+      window.rift.storeHistory(currentPrompt, currentResponse)
         .then(() => {
-          return window.shifted.getHistory(1);
+          return window.rift.getHistory(1);
         })
         .then(history => {
           if (history && history.length > 0) {
@@ -337,7 +337,7 @@ input.addEventListener('keydown', (e) => {
       console.log('Creating draft from current input before sending');
       routePrompt().then(() => {
         setTimeout(() => {
-          window.shifted.sendDraft()
+          window.rift.sendDraft()
             .then(result => {
               if (result.success) {
                 showStatus('Email sent successfully!');
@@ -354,7 +354,7 @@ input.addEventListener('keydown', (e) => {
         }, 1000);
       });
     } else {
-      window.shifted.sendDraft()
+      window.rift.sendDraft()
         .then(result => {
           if (result.success) {
             showStatus('Email sent successfully!');
@@ -372,7 +372,7 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
-window.shifted.onFocusInput(() => {
+window.rift.onFocusInput(() => {
   input.focus();
   input.select();
 });

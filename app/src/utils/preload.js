@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('shifted', {
+contextBridge.exposeInMainWorld('rift', {
   parseAndCreateEvent: (input) => ipcRenderer.invoke('parse-and-create-event', input),
   startAuth: () => ipcRenderer.invoke('start-auth'),
   oauthCallback: (code) => ipcRenderer.invoke('oauth-callback', code),

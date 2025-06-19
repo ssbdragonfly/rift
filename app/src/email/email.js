@@ -6,7 +6,7 @@ const express = require('express');
 const axios = require('axios');
 const { shell } = require('electron');
 
-const SERVICE = 'shifted-google-email';
+const SERVICE = 'rift-google-email';
 const ACCOUNT = os.userInfo().username;
 
 // oauth client
@@ -72,7 +72,7 @@ async function ensureEmailAuth(win) {
       
       if (win) {
         const { clearTokensAndAuth } = require('../utils/authHelper');
-        await clearTokensAndAuth('shifted-google-email', shell);
+        await clearTokensAndAuth('rift-google-email', shell);
       }
       
       throw new Error('auth required');
@@ -107,7 +107,7 @@ async function ensureEmailAuth(win) {
         
         if (win) {
           const { clearTokensAndAuth } = require('../utils/authHelper');
-          await clearTokensAndAuth('shifted-google-email', shell);
+          await clearTokensAndAuth('rift-google-email', shell);
         }
         
         throw new Error('auth required');
@@ -126,7 +126,7 @@ async function ensureEmailAuth(win) {
       if (isAuthError(err) && win) {
         console.log('[email] Auth error detected, triggering re-auth');
         const { clearTokensAndAuth } = require('../utils/authHelper');
-        await clearTokensAndAuth('shifted-google-email', shell);
+        await clearTokensAndAuth('rift-google-email', shell);
         throw new Error('auth required');
       }
       

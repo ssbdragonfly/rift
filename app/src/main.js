@@ -40,7 +40,7 @@ app.whenReady().then(async () => {
       console.log('[main] Auth validation failed, will prompt for re-auth when needed');
       try {
         const { clearTokensAndAuth } = require('./utils/authHelper');
-        await clearTokensAndAuth('shifted-google-calendar', shell);
+        await clearTokensAndAuth('rift-google-calendar', shell);
         console.log('[main] Cleared stored credentials and triggered re-auth');
       } catch (e) {
         console.error('[main] Failed to clear credentials:', e);
@@ -56,7 +56,7 @@ app.whenReady().then(async () => {
       if (!isEmailValid) {
         console.log('[main] Email auth validation failed, will prompt for re-auth when needed');
         const { clearTokensAndAuth } = require('./utils/authHelper');
-        await clearTokensAndAuth('shifted-google-email', shell);
+        await clearTokensAndAuth('rift-google-email', shell);
       }
     } catch (e) {
       console.error('[main] Error checking email auth:', e);

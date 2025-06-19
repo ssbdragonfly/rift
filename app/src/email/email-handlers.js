@@ -400,7 +400,7 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
       if (!isValid) {
         console.log('[email-handlers] Email auth not valid, triggering re-auth');
         const { clearTokensAndAuth } = require('../utils/authHelper');
-        await clearTokensAndAuth('shifted-google-email', shell);
+        await clearTokensAndAuth('rift-google-email', shell);
         return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
       }
     } catch (err) {
@@ -409,7 +409,7 @@ async function handleEmailDraftRequest(prompt, emailFunctions, shell, win) {
       if (isAuthError(err)) {
         console.log('[email-handlers] Auth error detected, triggering re-auth');
         const { clearTokensAndAuth } = require('../utils/authHelper');
-        await clearTokensAndAuth('shifted-google-email', shell);
+        await clearTokensAndAuth('rift-google-email', shell);
       }
       return { type: 'error', error: 'Email authentication required. Please check your browser to complete the sign-in process.' };
     }

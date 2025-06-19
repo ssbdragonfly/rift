@@ -5,7 +5,7 @@ const os = require('os');
 const express = require('express');
 const { shell } = require('electron');
 
-const SERVICE = 'shifted-google-drive';
+const SERVICE = 'rift-google-drive';
 const ACCOUNT = os.userInfo().username;
 let driveOAuth2Client = null;
 let redirectUri;

@@ -4,7 +4,7 @@ const keytar = require('keytar');
 const os = require('os');
 const express = require('express');
 const { shell } = require('electron');
-const SERVICE = 'shifted-google-calendar';
+const SERVICE = 'rift-google-calendar';
 const ACCOUNT = os.userInfo().username;
 
 let oauth2Client;
@@ -63,7 +63,7 @@ async function ensureAuth(win) {
       
       if (win) {
         const { clearTokensAndAuth } = require('../utils/authHelper');
-        await clearTokensAndAuth('shifted-google-calendar', shell);
+        await clearTokensAndAuth('rift-google-calendar', shell);
       }
       
       throw new Error('auth required');
@@ -91,7 +91,7 @@ async function ensureAuth(win) {
         
         if (win) {
           const { clearTokensAndAuth } = require('../utils/authHelper');
-          await clearTokensAndAuth('shifted-google-calendar', shell);
+          await clearTokensAndAuth('rift-google-calendar', shell);
         }
         
         throw new Error('auth required');
@@ -116,7 +116,7 @@ async function ensureAuth(win) {
       if (isAuthError(err) && win) {
         console.log('[google] Auth error detected, triggering re-auth');
         const { clearTokensAndAuth } = require('../utils/authHelper');
-        await clearTokensAndAuth('shifted-google-calendar', shell);
+        await clearTokensAndAuth('rift-google-calendar', shell);
         throw new Error('auth required');
       }
       
@@ -162,7 +162,7 @@ async function getAuthUrl() {
         if (code) {
           try {
             await handleOAuthCallback(code);
-            res.send('<h2>Authentication successful! You may close this window and return to Shifted.</h2>');
+            res.send('<h2>Authentication successful! You may close this window and return to Rift.</h2>');
           }
           catch (err) {
             res.send('<h2>Authentication failed: ' + err.message + '</h2>');
