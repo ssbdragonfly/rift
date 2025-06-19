@@ -13,21 +13,29 @@ async function detectIntent(prompt) {
     
     Respond with ONLY ONE of these categories:
     - EMAIL_DRAFT: If the user wants to create, compose, or send an email
-    - EMAIL_VIEW: If the user wants to view a specific email (e.g., "show me the Wall Street Journal email", "open the email from Amazon", "show me emails about meeting", "open email #2")
+    - EMAIL_VIEW: If the user wants to view a specific email (e.g., "show me the Wall Street Journal email", "open the email from Amazon")
     - EMAIL_QUERY: If the user wants to check, view, or list emails in general (e.g., "do I have any unread emails")
     - CALENDAR_CREATE: If the user wants to create or add a calendar event
     - CALENDAR_QUERY: If the user wants to check or view calendar events
     - CALENDAR_MODIFY: If the user wants to modify, update, or change a calendar event
     - CALENDAR_DELETE: If the user wants to delete or remove a calendar event
+    - DRIVE_SEARCH: If the user wants to search for files in Google Drive
+    - DRIVE_OPEN: If the user wants to open or view a specific file from Google Drive
+    - DRIVE_SHARE: If the user wants to share a file from Google Drive
+    - DOCS_CREATE: If the user wants to create a new Google Doc
+    - DOCS_SEARCH: If the user wants to search for Google Docs
+    - DOCS_OPEN: If the user wants to open or view a specific Google Doc
+    - DOCS_SHARE: If the user wants to share a Google Doc
+    - DOCS_UPDATE: If the user wants to update or add content to a Google Doc
+    - MEET_CREATE: If the user wants to create a Google Meet
+    - MEET_SHARE: If the user wants to share a Google Meet link
     - CHAT: If the request doesn't fit any of the above categories
     
-    Be smart about detecting EMAIL_VIEW intents. If the user mentions a specific email source (like "Wall Street Journal", "Amazon", "helpbnk") or topic, or uses a number reference, classify it as EMAIL_VIEW, not EMAIL_QUERY.
+    Be smart about understanding the user's intent. For example:
+    - "Search for notes in my Google Docs" should be DOCS_SEARCH, not searching for the literal term "notes"
+    - "Create a Google Meet and email it to john@example.com" should be recognized as a complex workflow
     
     Respond with ONLY the category name, nothing else.
-    Do not include any other text in your response.
-    Example:
-    Prompt: "Show me the Wall Street Journal email"
-    Response: EMAIL_VIEW
     `;
 
     const body = {
@@ -54,7 +62,7 @@ async function detectIntent(prompt) {
 function detectIntentWithRegex(prompt) {
   const lowerPrompt = prompt.toLowerCase();
   
-  if (/\b(draft|write|compose|create|send)\s+(email|mail|message)\b/i.test(prompt) || /\b(email|mail|message)\s+(to|for)\b/i.test(prompt) ||/\b(email|mail|message)\s+([a-z]+)\b/i.test(prompt)) {
+  if (/\b(draft|write|compose|create|send)\s+(email|mail|message)\b/i.test(prompt) || /\b(email|mail|message)\s+(to|for)\b/i.test(prompt)) {
     return 'EMAIL_DRAFT';
   }
   
@@ -62,21 +70,32 @@ function detectIntentWithRegex(prompt) {
     return 'EMAIL_QUERY';
   }
   
-  if (/\b(delete|remove|cancel)\b/i.test(prompt) &&  /\b(event|meeting|appointment|calendar)\b/i.test(prompt)) {
+  if (/\b(delete|remove|cancel)\b/i.test(prompt) && /\b(event|meeting|appointment|calendar)\b/i.test(prompt)) {
     return 'CALENDAR_DELETE';
   }
   
-  if (/\b(change|modify|update|edit|rename|reschedule|add|invite)\b/i.test(prompt) &&  /\b(event|meeting|appointment|calendar)\b/i.test(prompt)) {
+  if (/\b(change|modify|update|edit|rename|reschedule|add|invite)\b/i.test(prompt) && /\b(event|meeting|appointment|calendar)\b/i.test(prompt)) {
     return 'CALENDAR_MODIFY';
   }
   
-  if (/\b(what|when|show|list|do i have|upcoming|next|today|tomorrow|this|week|month|schedule|events?|calendar|meetings?|appointments?|on my calendar|my schedule)\b/i.test(prompt) &&  !/\b(add|create|schedule|set up|make|new)\b/i.test(prompt.substring(0, 20))) {
+  if (/\b(what|when|show|list|do i have|upcoming|next|today|tomorrow|this|week|month|schedule|events?|calendar|meetings?|appointments?)\b/i.test(prompt)) {
     return 'CALENDAR_QUERY';
   }
   
-  if (/\b(add|create|schedule|set up|make|new)\b/i.test(prompt) && 
-      /\b(event|meeting|appointment|calendar)\b/i.test(prompt)) {
+  if (/\b(add|create|schedule|set up|make|new)\b/i.test(prompt) && /\b(event|meeting|appointment|calendar)\b/i.test(prompt)) {
     return 'CALENDAR_CREATE';
+  }
+  
+  if (/\b(search|find|look\s+for)\b/i.test(prompt) && /\b(drive|files?|documents?)\b/i.test(prompt)) {
+    return 'DRIVE_SEARCH';
+  }
+  
+  if (/\b(search|find|look\s+for)\b/i.test(prompt) && /\b(google\s+docs?|documents?|notes?)\b/i.test(prompt)) {
+    return 'DOCS_SEARCH';
+  }
+  
+  if (/\b(create|make|new)\b/i.test(prompt) && /\b(google\s+meet|video\s+call|video\s+conference|video\s+meeting)\b/i.test(prompt)) {
+    return 'MEET_CREATE';
   }
   
   return 'CHAT';

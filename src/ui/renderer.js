@@ -33,6 +33,12 @@ function setFollowUpMode(prompt, response, mode = 'draft', label = null) {
       case 'email-view':
         responseDiv.dataset.followUpLabel = 'Follow-up mode - Ask about this email';
         break;
+      case 'drive-search':
+        responseDiv.dataset.followUpLabel = 'Follow-up mode - Select a file to open';
+        break;
+      case 'docs-search':
+        responseDiv.dataset.followUpLabel = 'Follow-up mode - Select a document to open';
+        break;
       default:
         responseDiv.dataset.followUpLabel = 'Follow-up mode';
     }
@@ -147,7 +153,6 @@ async function routePrompt() {
       showStatus('Email search results:');
       showResponse(`🔍 ${res.response || 'No matching emails found.'}`);
       
-      // Enable follow-up mode for email search results
       if (res.followUpMode) {
         setFollowUpMode(val, res.response, 'email-search', 'Follow-up mode - Select an email to view');
       } else {
@@ -157,7 +162,6 @@ async function routePrompt() {
       showStatus('Email content:');
       showResponse(`📨 ${res.response || 'Email not found.'}`);
       
-      // Enable follow-up mode for email viewing
       if (res.followUpMode) {
         setFollowUpMode(val, res.response, 'email-view', 'Follow-up mode - Ask about this email');
       } else {
@@ -167,12 +171,65 @@ async function routePrompt() {
       showStatus('Email draft created');
       showResponse(`📝 ${res.response || 'Draft created.'}`);
       
-      // Enable follow-up mode for email drafts
       setFollowUpMode(val, res.response, 'draft', 'Follow-up mode - Type to improve this draft');
     } else if (res.type === 'email-sent') {
       showStatus('Email sent successfully!');
       input.value = '';
       showResponse(`📤 ${res.response || 'Email sent.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'drive-search') {
+      showStatus('Google Drive search results:');
+      showResponse(`📁 ${res.response || 'No files found.'}`);
+      
+      if (res.followUpMode) {
+        setFollowUpMode(val, res.response, 'drive-search', 'Follow-up mode - Select a file to open');
+      } else {
+        clearFollowUpMode();
+      }
+    } else if (res.type === 'drive-open') {
+      showStatus('Google Drive file opened:');
+      showResponse(`📄 ${res.response || 'File opened.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'drive-share') {
+      showStatus('Google Drive file shared:');
+      showResponse(`🔗 ${res.response || 'File shared.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'docs-create') {
+      showStatus('Google Doc created:');
+      showResponse(`📝 ${res.response || 'Document created.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'docs-search') {
+      showStatus('Google Docs search results:');
+      showResponse(`🔍 ${res.response || 'No documents found.'}`);
+      
+      if (res.followUpMode) {
+        setFollowUpMode(val, res.response, 'docs-search', 'Follow-up mode - Select a document to open');
+      } else {
+        clearFollowUpMode();
+      }
+    } else if (res.type === 'docs-open') {
+      showStatus('Google Doc opened:');
+      showResponse(`📄 ${res.response || 'Document opened.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'docs-share') {
+      showStatus('Google Doc shared:');
+      showResponse(`🔗 ${res.response || 'Document shared.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'docs-update') {
+      showStatus('Google Doc updated:');
+      showResponse(`✏️ ${res.response || 'Document updated.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'meet-create') {
+      showStatus('Google Meet created:');
+      showResponse(`🎥 ${res.response || 'Meeting created.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'meet-share') {
+      showStatus('Google Meet shared:');
+      showResponse(`🔗 ${res.response || 'Meeting shared.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'workflow-result') {
+      showStatus('Workflow completed:');
+      showResponse(`🔄 ${res.response || 'Workflow completed.'}`);
       clearFollowUpMode();
     } else if (res.type === 'chat') {
       showStatus('');
@@ -219,14 +276,12 @@ input.addEventListener('keydown', (e) => {
     const currentPrompt = input.value.trim();
     const currentResponse = responseDiv.innerHTML.trim();
     
-    // If we're already in follow-up mode, just show a message
     if (responseDiv.classList.contains('follow-up-mode')) {
       showStatus('Already in follow-up mode', '#ffa0a0');
       setTimeout(() => showStatus(''), 1500);
       return;
     }
     
-    // If there's content in the response area, use that for follow-up
     if (responseDiv.innerHTML.trim()) {
       console.log('Setting follow-up mode from current response');
       setFollowUpMode(
@@ -241,7 +296,6 @@ input.addEventListener('keydown', (e) => {
       return;
     }
     
-    // Otherwise, try to get history
     if (currentPrompt || currentResponse) {
       console.log('Storing prompt and response for follow-up');
       window.shifted.storeHistory(currentPrompt, currentResponse)

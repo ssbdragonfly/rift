@@ -22,7 +22,7 @@ function createEmailViewerWindow() {
     title: 'Email Viewer'
   });
 
-  viewerWindow.loadFile('emailViewer.html');
+  viewerWindow.loadFile(path.join(__dirname, '../ui/emailViewer.html'));
   
   viewerWindow.on('closed', () => {
     viewerWindow = null;

@@ -432,6 +432,34 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
   try {
     const { ensureAuth, getAuthUrl, createEvent, validateAndRefreshAuth } = require('./calendar/google');
     const { detectIntent } = require('./utils/intentDetector');
+    if (/\b(create|make|set up|schedule)\s+(a\s+)?(google\s+)?meet(ing)?\b/i.test(prompt)) {
+      console.log('[main] Detected Google Meet creation request, handling directly');
+      const meetHandlers = require('./meet/meet-handlers');
+      return await meetHandlers.handleCreateMeeting(prompt, shell, win);
+    }
+    
+    const handlers = {
+      email: emailHandlers,
+      emailFunctions,
+      drive: require('./drive/drive-handlers'),
+      docs: require('./docs/docs-handlers'),
+      meet: require('./meet/meet-handlers'),
+      shell,
+      win
+    };
+    
+    const workflowManager = require('./utils/workflowManager');
+    const workflow = await workflowManager.detectWorkflow(prompt);
+    if (workflow && workflow.isWorkflow) {
+      console.log(`[main] Detected workflow: ${workflow.workflowType}`);
+      if (workflow.workflowType === 'MEET_AND_EMAIL' || (workflow.workflowType === 'CUSTOM' && /\b(meet|meeting)\b/i.test(prompt))) {
+        console.log('[main] Using meet handler directly for workflow');
+        return await handlers.meet.handleCreateMeeting(prompt, shell, win);
+      }
+      else {
+        return await workflowManager.handleWorkflow(workflow.workflowType, prompt, handlers);
+      }
+    }
     
     const intent = await detectIntent(prompt);
     console.log(`[main] Detected intent: ${intent} for prompt: "${prompt}"`);
@@ -491,6 +519,56 @@ ${emailContent.suggestedResponse ? "\n\nSuggested response available in the view
     
     if (intent === 'EMAIL_DRAFT') {
       return await emailHandlers.handleEmailDraftRequest(prompt, emailFunctions, shell, win);
+    }
+    
+    if (intent === 'DRIVE_SEARCH') {
+      const driveHandlers = require('./drive/drive-handlers');
+      return await driveHandlers.handleDriveSearch(prompt, shell, win);
+    }
+    
+    if (intent === 'DRIVE_OPEN') {
+      const driveHandlers = require('./drive/drive-handlers');
+      return await driveHandlers.handleDriveFileOpen(prompt, shell, win);
+    }
+    
+    if (intent === 'DRIVE_SHARE') {
+      const driveHandlers = require('./drive/drive-handlers');
+      return await driveHandlers.handleDriveFileShare(prompt, shell, win);
+    }
+    
+    if (intent === 'DOCS_CREATE') {
+      const docsHandlers = require('./docs/docs-handlers');
+      return await docsHandlers.handleCreateDoc(prompt, shell, win);
+    }
+    
+    if (intent === 'DOCS_SEARCH') {
+      const docsHandlers = require('./docs/docs-handlers');
+      return await docsHandlers.handleSearchDocs(prompt, shell, win);
+    }
+    
+    if (intent === 'DOCS_OPEN') {
+      const docsHandlers = require('./docs/docs-handlers');
+      return await docsHandlers.handleOpenDoc(prompt, shell, win);
+    }
+    
+    if (intent === 'DOCS_SHARE') {
+      const docsHandlers = require('./docs/docs-handlers');
+      return await docsHandlers.handleShareDoc(prompt, shell, win);
+    }
+    
+    if (intent === 'DOCS_UPDATE') {
+      const docsHandlers = require('./docs/docs-handlers');
+      return await docsHandlers.handleUpdateDoc(prompt, shell, win);
+    }
+    
+    if (intent === 'MEET_CREATE') {
+      const meetHandlers = require('./meet/meet-handlers');
+      return await meetHandlers.handleCreateMeeting(prompt, shell, win);
+    }
+    
+    if (intent === 'MEET_SHARE') {
+      const meetHandlers = require('./meet/meet-handlers');
+      return await meetHandlers.handleShareMeetingViaEmail(prompt, shell, win);
     }
     
     try {
@@ -580,7 +658,7 @@ ${emailContent.suggestedResponse ? "\n\nSuggested response available in the view
       }
     }
     
-    return { type: 'chat', response: 'I\'m not sure how to help with that. You can ask me about your calendar events, emails, or create new events and emails.' };
+    return { type: 'chat', response: 'I\'m not sure how to help with that. You can ask me about your calendar events, emails, Google Drive files, Google Docs, or create Google Meet meetings.' };
   } catch (err) {
     console.error('[main] Unhandled error in route-prompt:', err);
     return { type: 'error', error: err.message };
