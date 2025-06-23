@@ -3,23 +3,57 @@
   "version": "0.1.0",
   "description": "Rift: Personal assistant with Google Calendar, Email, Drive, Docs, and Meet integration",
   "main": "src/main.js",
+  "author": "Rift Team",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder",
-    "test": "node test.js"
+    "build": "electron-builder"
   },
   "dependencies": {
     "axios": "^1.9.0",
     "dotenv": "^16.4.5",
-    "electron": "^28.2.3",
     "express": "^4.19.2",
     "get-port": "^7.1.0",
     "googleapis": "^133.0.0",
     "keytar": "^7.9.0",
     "marked": "^9.1.5",
+    "node-mac-permissions": "^2.5.0",
     "openai": "^4.30.0"
   },
   "devDependencies": {
+    "electron": "^28.2.3",
     "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.rift.app",
+    "productName": "Rift",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "favicon.ico"
+    },
+    "win": {
+      "icon": "favicon.ico"
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "favicon.ico"
+    },
+    "asarUnpack": [
+      "node_modules/keytar"
+    ],
+    "files": [
+      "**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!**/._*",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!**/{appveyor.yml,.travis.yml,circle.yml}",
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+    ],
+    "asar": true
   }
 }

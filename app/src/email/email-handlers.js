@@ -178,6 +178,35 @@ async function handleEmailViewRequest(prompt, emailFunctions, shell, win) {
       
       const email = unreadResult.emails[emailNumber - 1];
       const emailContent = await emailFunctions.getEmailContent(email.id);
+      
+      if (emailContent.error) {
+        return { type: 'error', error: emailContent.error };
+      }
+      
+      let responseAnalysis = '';
+      try {
+        const analysis = await emailFunctions.analyzeEmailForResponse(emailContent);
+        if (analysis) {
+          responseAnalysis = `\n\nSuggested response:\n${analysis}`;
+        }
+      } catch (err) {
+        console.error('[email] Error analyzing email for response:', err);
+      }
+      
+      const emailViewer = require('./emailViewer');
+      emailViewer.showEmail(emailContent);
+      
+      const formattedEmail = `
+Subject: ${emailContent.subject}
+From: ${emailContent.from}
+To: ${emailContent.to}
+Date: ${emailContent.date}
+
+Email opened in viewer window. You can reply directly from there.
+${responseAnalysis ? "\n\nSuggested response available in the viewer." : ""}
+      `.trim();
+      
+      return { type: 'email-view', response: formattedEmail };
     } 
     else if (searchMatch) {
       const searchTerm = searchMatch[4].trim();
@@ -204,6 +233,35 @@ async function handleEmailViewRequest(prompt, emailFunctions, shell, win) {
       
       const email = searchResult.emails[0];
       const emailContent = await emailFunctions.getEmailContent(email.id);
+      
+      if (emailContent.error) {
+        return { type: 'error', error: emailContent.error };
+      }
+      
+      let responseAnalysis = '';
+      try {
+        const analysis = await emailFunctions.analyzeEmailForResponse(emailContent);
+        if (analysis) {
+          responseAnalysis = `\n\nSuggested response:\n${analysis}`;
+        }
+      } catch (err) {
+        console.error('[email] Error analyzing email for response:', err);
+      }
+      
+      const emailViewer = require('./emailViewer');
+      emailViewer.showEmail(emailContent);
+      
+      const formattedEmail = `
+Subject: ${emailContent.subject}
+From: ${emailContent.from}
+To: ${emailContent.to}
+Date: ${emailContent.date}
+
+Email opened in viewer window. You can reply directly from there.
+${responseAnalysis ? "\n\nSuggested response available in the viewer." : ""}
+      `.trim();
+      
+      return { type: 'email-view', response: formattedEmail };
     }
     else {
       return { type: 'chat', response: 'Please specify which email you want to view by number (e.g., "view email #2") or by content (e.g., "show email about meeting").' };

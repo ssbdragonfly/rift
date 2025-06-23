@@ -61,6 +61,20 @@ app.whenReady().then(async () => {
     } catch (e) {
       console.error('[main] Error checking email auth:', e);
     }
+    
+    try {
+      const { validateAndRefreshAuth } = require('./spotify/spotify');
+      const isSpotifyValid = await validateAndRefreshAuth();
+      if (!isSpotifyValid) {
+        console.log('[main] Spotify auth validation failed, will prompt for re-auth when needed');
+        const { clearTokensAndAuth } = require('./utils/authHelper');
+        await clearTokensAndAuth('rift-spotify', shell);
+      } else {
+        console.log('[main] Spotify auth validation successful');
+      }
+    } catch (e) {
+      console.error('[main] Error checking Spotify auth:', e);
+    }
   }
   catch (err) {
     console.error('[main] Error validating auth on startup:', err);
@@ -569,6 +583,26 @@ ${emailContent.suggestedResponse ? "\n\nSuggested response available in the view
     if (intent === 'MEET_SHARE') {
       const meetHandlers = require('./meet/meet-handlers');
       return await meetHandlers.handleShareMeetingViaEmail(prompt, shell, win);
+    }
+    
+    if (intent === 'SPOTIFY_PLAY') {
+      const spotifyHandlers = require('./spotify/spotify-handlers');
+      return await spotifyHandlers.handlePlayMusic(prompt, shell, win);
+    }
+    
+    if (intent === 'SPOTIFY_SEARCH') {
+      const spotifyHandlers = require('./spotify/spotify-handlers');
+      return await spotifyHandlers.handleSearchMusic(prompt, shell, win);
+    }
+    
+    if (intent === 'SPOTIFY_CONTROL') {
+      const spotifyHandlers = require('./spotify/spotify-handlers');
+      return await spotifyHandlers.handleControlPlayback(prompt, shell, win);
+    }
+    
+    if (intent === 'SPOTIFY_PLAYLIST') {
+      const spotifyHandlers = require('./spotify/spotify-handlers');
+      return await spotifyHandlers.handlePlaylistOperations(prompt, shell, win);
     }
     
     try {

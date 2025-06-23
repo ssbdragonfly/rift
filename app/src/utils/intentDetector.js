@@ -29,11 +29,16 @@ async function detectIntent(prompt) {
     - DOCS_UPDATE: If the user wants to update or add content to a Google Doc
     - MEET_CREATE: If the user wants to create a Google Meet
     - MEET_SHARE: If the user wants to share a Google Meet link
+    - SPOTIFY_PLAY: If the user wants to play music, a song, an artist, or an album on Spotify
+    - SPOTIFY_SEARCH: If the user wants to search for music, songs, artists, or albums on Spotify
+    - SPOTIFY_CONTROL: If the user wants to control Spotify playback (pause, resume, next, previous, etc.)
+    - SPOTIFY_PLAYLIST: If the user wants to create, modify, or play a Spotify playlist
     - CHAT: If the request doesn't fit any of the above categories
     
     Be smart about understanding the user's intent. For example:
     - "Search for notes in my Google Docs" should be DOCS_SEARCH, not searching for the literal term "notes"
     - "Create a Google Meet and email it to john@example.com" should be recognized as a complex workflow
+    - "Play some jazz music" should be SPOTIFY_PLAY, recognizing the music-related intent
     
     Respond with ONLY the category name, nothing else.
     `;
@@ -96,6 +101,26 @@ function detectIntentWithRegex(prompt) {
   
   if (/\b(create|make|new)\b/i.test(prompt) && /\b(google\s+meet|video\s+call|video\s+conference|video\s+meeting)\b/i.test(prompt)) {
     return 'MEET_CREATE';
+  }
+  
+  if (/\b(play|start|listen\s+to)\b/i.test(prompt) && /\b(music|song|track|artist|album|spotify)\b/i.test(prompt)) {
+    return 'SPOTIFY_PLAY';
+  }
+  
+  if (/\b(search|find|look\s+for)\b/i.test(prompt) && /\b(music|song|track|artist|album|spotify)\b/i.test(prompt)) {
+    return 'SPOTIFY_SEARCH';
+  }
+  
+  if (/\b(pause|stop|resume|next|previous|skip|volume|shuffle|repeat)\b/i.test(prompt) && /\b(music|song|track|spotify)\b/i.test(prompt)) {
+    return 'SPOTIFY_CONTROL';
+  }
+  
+  if (/\b(playlist|create\s+playlist|add\s+to\s+playlist)\b/i.test(prompt) && /\b(music|song|track|spotify)\b/i.test(prompt)) {
+    return 'SPOTIFY_PLAYLIST';
+  }
+  
+  if (/\b(music|song|track|artist|album)\b/i.test(prompt) && (/\b(play|start|listen\s+to|search|find|look\s+for)\b/i.test(prompt))) {
+    return 'SPOTIFY_PLAY';
   }
   
   return 'CHAT';
