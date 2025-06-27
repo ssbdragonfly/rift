@@ -6,10 +6,15 @@ const express = require('express');
 const axios = require('axios');
 const { shell } = require('electron');
 
+console.log('[email] Environment check:', {
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'Present' : 'Missing',
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'Present' : 'Missing',
+  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? 'Present' : 'Missing'
+});
+
 const SERVICE = 'rift-google-email';
 const ACCOUNT = os.userInfo().username;
 
-// oauth client
 let emailOAuth2Client = null;
 let redirectUri;
 
@@ -215,7 +220,7 @@ async function handleEmailOAuthCallback(code) {
   }
 }
 
-async function getUnreadEmails(maxResults = 50) {
+async function getUnreadEmails(maxResults = 10) {
   try {
     console.log('[email] Getting unread emails, max:', maxResults);
     
@@ -362,9 +367,9 @@ async function getEmailContent(messageId) {
       to,
       date: new Date(date).toLocaleString(),
       body,
-      htmlBody: htmlBody || body, // Use plain text if no HTML
+      htmlBody: htmlBody || body,
       snippet: message.snippet,
-      raw: message // Include the raw message for debugging
+      raw: message
     };
   } catch (err) {
     console.error('[email] Error getting email content:', err);
@@ -539,7 +544,6 @@ async function validateEmailAuth() {
       }
     }
     
-    // Test the auth with a simple API call
     try {
       const gmail = google.gmail({ version: 'v1', auth: emailOAuth2Client });
       await gmail.users.getProfile({ userId: 'me' });
@@ -548,14 +552,12 @@ async function validateEmailAuth() {
     } catch (err) {
       console.error('[email] API test failed:', err);
       
-      // Check if this is an auth error
       const { isAuthError } = require('../utils/authHelper');
       if (isAuthError(err)) {
         console.log('[email] Auth error detected, tokens may be invalid');
         return false;
       }
       
-      // For non-auth errors, we might still have valid auth
       return true;
     }
   } catch (err) {

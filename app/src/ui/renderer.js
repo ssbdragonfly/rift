@@ -39,6 +39,9 @@ function setFollowUpMode(prompt, response, mode = 'draft', label = null) {
       case 'docs-search':
         responseDiv.dataset.followUpLabel = 'Follow-up mode - Select a document to open';
         break;
+      case 'spotify-playlist-selection':
+        responseDiv.dataset.followUpLabel = 'Follow-up mode - Select a playlist to play';
+        break;
       default:
         responseDiv.dataset.followUpLabel = 'Follow-up mode';
     }
@@ -227,6 +230,37 @@ async function routePrompt() {
       showStatus('Google Meet shared:');
       showResponse(`🔗 ${res.response || 'Meeting shared.'}`);
       clearFollowUpMode();
+    } else if (res.type === 'spotify-play') {
+      if (res.success) {
+        showStatus('Spotify playback:');
+        showResponse(`🎵 ${res.result || 'Music playing.'}`);
+        clearFollowUpMode();
+      } else if (res.followUpMode) {
+        showStatus('Spotify playlists:');
+        showResponse(`🎵 ${res.error || 'Please select a playlist.'}`);
+        setFollowUpMode(val, res.error, 'spotify-playlist-selection', 'Follow-up mode - Select a playlist to play');
+      } else {
+        showStatus('Spotify error:', '#ffa0a0');
+        showResponse(`🎵 ${res.error || 'Error playing music.'}`);
+        clearFollowUpMode();
+      }
+    } else if (res.type === 'spotify-search') {
+      showStatus('Spotify search results:');
+      showResponse(`🔍 ${res.result || 'Search results.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'spotify-control') {
+      showStatus('Spotify control:');
+      showResponse(`⏯️ ${res.result || 'Playback controlled.'}`);
+      clearFollowUpMode();
+    } else if (res.type === 'spotify-playlist') {
+      showStatus('Spotify playlist:');
+      showResponse(`📋 ${res.result || 'Playlist operation completed.'}`);
+      
+      if (res.followUpMode) {
+        setFollowUpMode(val, res.result, 'spotify-playlist-selection', 'Follow-up mode - Select a playlist to play');
+      } else {
+        clearFollowUpMode();
+      }
     } else if (res.type === 'workflow-result') {
       showStatus('Workflow completed:');
       showResponse(`🔄 ${res.response || 'Workflow completed.'}`);

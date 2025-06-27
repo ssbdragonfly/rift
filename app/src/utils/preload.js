@@ -15,5 +15,8 @@ contextBridge.exposeInMainWorld('rift', {
   storeHistory: (prompt, response) => ipcRenderer.invoke('store-history', prompt, response),
   getHistory: () => ipcRenderer.invoke('get-history'),
   startEmailAuth: () => ipcRenderer.invoke('start-email-auth'),
-  emailOAuthCallback: (code) => ipcRenderer.invoke('email-oauth-callback', code)
+  emailOAuthCallback: (code) => ipcRenderer.invoke('email-oauth-callback', code),
+  startSpotifyAuth: () => ipcRenderer.invoke('start-spotify-auth'),
+  spotifyOAuthCallback: (code) => ipcRenderer.invoke('spotify-oauth-callback', code),
+  checkSpotifyAuth: () => ipcRenderer.invoke('check-spotify-auth')
 });

@@ -1,11 +1,26 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
 const path = require('path');
-const isDev = !app.isPackaged;
+const { app, BrowserWindow, globalShortcut, ipcMain, shell } = require('electron');
+if (app && app.isPackaged){
+  require('dotenv').config({ path: path.join(process.resourcesPath, '.env') });
+  require('dotenv').config({ path: path.join(__dirname, '.env') });
+}
+else {
+  require('dotenv').config();
+}
+const isDev = !app || !app.isPackaged;
 const { createEvent, ensureAuth, getAuthUrl, handleOAuthCallback, deleteEvent } = require('./calendar/google');
 const { parseEvent } = require('./calendar/parser');
 const { google } = require('googleapis');
 const emailFunctions = require('./email/email');
 const emailHandlers = require('./email/email-handlers');
+
+console.log('[main] Environment check:', {
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'Present' : 'Missing',
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'Present' : 'Missing',
+  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? 'Present' : 'Missing',
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'Present' : 'Missing',
+  isPackaged: app ? app.isPackaged : false
+});
 
 let win;
 
@@ -16,7 +31,7 @@ function createWindow() {
     frame: false,
     resizable: true,
     alwaysOnTop: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
     transparent: true,
     webPreferences: {
       preload: path.join(__dirname, 'utils/preload.js'),
@@ -69,6 +84,8 @@ app.whenReady().then(async () => {
         console.log('[main] Spotify auth validation failed, will prompt for re-auth when needed');
         const { clearTokensAndAuth } = require('./utils/authHelper');
         await clearTokensAndAuth('rift-spotify', shell);
+        
+        console.log('[main] Spotify auth will be requested when needed');
       } else {
         console.log('[main] Spotify auth validation successful');
       }
@@ -95,6 +112,16 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', (e) => {
+  e.preventDefault();
+});
+
+app.on('activate', () => {
+  if (win && !win.isDestroyed()) {
+    win.center();
+    win.show();
+    win.focus();
+    win.webContents.send('focus-input');
+  }
 });
 
 function isCalendarQuery(prompt) {
@@ -112,7 +139,7 @@ function isModifyEvent(prompt) {
 }
 
 function extractTitleForDelete(prompt) {
-  const quotedMatch = prompt.match(/['"]([^'"]+)['"]/);
+  const quotedMatch = prompt.match(/['"]([^'"]+)['"]/)
   if (quotedMatch){
     return quotedMatch[1].trim();
   }
@@ -345,7 +372,7 @@ function setupEmailHandlers() {
       if (err.message === 'auth required') {
         try {
           const url = await emailFunctions.getEmailAuthUrl();
-          shell.openExternal(authUrl);
+          shell.openExternal(url);
           return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
         } catch (authErr) {
           console.error('[main] Error getting email auth URL:', authErr);
@@ -371,7 +398,7 @@ function setupEmailHandlers() {
       if (err.message === 'auth required') {
         try {
           const url = await emailFunctions.getEmailAuthUrl();
-          shell.openExternal(authUrl);
+          shell.openExternal(url);
           return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
         }
         catch (authErr) {
@@ -412,7 +439,7 @@ function setupEmailHandlers() {
       if (err.message === 'auth required') {
         try {
           const url = await emailFunctions.getEmailAuthUrl();
-          shell.openExternal(authUrl);
+          shell.openExternal(url);
           return { error: 'Authentication required. Please check your browser to complete the sign-in process.' };
         }
         catch (authErr) {
@@ -463,15 +490,50 @@ ipcMain.handle('route-prompt', async (event, prompt) => {
     };
     
     const workflowManager = require('./utils/workflowManager');
-    const workflow = await workflowManager.detectWorkflow(prompt);
-    if (workflow && workflow.isWorkflow) {
-      console.log(`[main] Detected workflow: ${workflow.workflowType}`);
-      if (workflow.workflowType === 'MEET_AND_EMAIL' || (workflow.workflowType === 'CUSTOM' && /\b(meet|meeting)\b/i.test(prompt))) {
-        console.log('[main] Using meet handler directly for workflow');
-        return await handlers.meet.handleCreateMeeting(prompt, shell, win);
+    if (!/\b(spotify|music|song|play|pause|resume|next|previous|skip|playlist)\b/i.test(prompt)) {
+      const workflow = await workflowManager.detectWorkflow(prompt);
+      if (workflow && workflow.isWorkflow) {
+        console.log(`[main] Detected workflow: ${workflow.workflowType}`);
+        if (workflow.workflowType === 'MEET_AND_EMAIL' || (workflow.workflowType === 'CUSTOM' && /\b(meet|meeting)\b/i.test(prompt))) {
+          console.log('[main] Using meet handler directly for workflow');
+          return await handlers.meet.handleCreateMeeting(prompt, shell, win);
+        }
+        else {
+          return await workflowManager.handleWorkflow(workflow.workflowType, prompt, handlers);
+        }
       }
-      else {
-        return await workflowManager.handleWorkflow(workflow.workflowType, prompt, handlers);
+    }
+    
+    let followUpMode = null;
+    let followUpType = null;
+    if (prompt.includes('FOLLOW_UP_MODE:')) {
+      const match = prompt.match(/FOLLOW_UP_MODE:\s*([\w-]+)/i);
+      if (match) {
+        followUpMode = match[1];
+        console.log(`[main] Detected follow-up mode: ${followUpMode}`);
+      }
+      
+      const typeMatch = prompt.match(/FOLLOW_UP_TYPE:\s*([\w-]+)/i);
+      if (typeMatch) {
+        followUpType = typeMatch[1];
+        console.log(`[main] Detected follow-up type: ${followUpType}`);
+      }
+    }
+    
+    if (followUpMode) {
+      const newPrompt = prompt.includes('NEW_PROMPT:') ? 
+        prompt.split('NEW_PROMPT:')[1].trim() : prompt;
+      
+      if (followUpType === 'spotify-playlist-selection') {
+        console.log('[main] Handling Spotify playlist selection in follow-up mode');
+        const spotifyHandlers = require('./spotify/spotify-handlers');
+        return await spotifyHandlers.handlePlayFromPlaylist(newPrompt, shell, win);
+      }
+      
+      if (followUpType === 'email-edit') {
+        console.log('[main] Handling email edit in follow-up mode');
+        const result = await emailHandlers.updateDraftEmail(newPrompt);
+        return result;
       }
     }
     
@@ -535,6 +597,11 @@ ${emailContent.suggestedResponse ? "\n\nSuggested response available in the view
       return await emailHandlers.handleEmailDraftRequest(prompt, emailFunctions, shell, win);
     }
     
+    if (intent === 'EMAIL_EDIT') {
+      const result = await emailHandlers.updateDraftEmail(prompt);
+      return result;
+    }
+    
     if (intent === 'DRIVE_SEARCH') {
       const driveHandlers = require('./drive/drive-handlers');
       return await driveHandlers.handleDriveSearch(prompt, shell, win);
@@ -586,22 +653,34 @@ ${emailContent.suggestedResponse ? "\n\nSuggested response available in the view
     }
     
     if (intent === 'SPOTIFY_PLAY') {
+      console.log('[main] Handling Spotify play request');
       const spotifyHandlers = require('./spotify/spotify-handlers');
-      return await spotifyHandlers.handlePlayMusic(prompt, shell, win);
+      const result = await spotifyHandlers.handlePlayMusic(prompt, shell, win);
+      console.log('[main] Spotify play result:', result.type);
+      return result;
     }
     
     if (intent === 'SPOTIFY_SEARCH') {
+      console.log('[main] Handling Spotify search request');
       const spotifyHandlers = require('./spotify/spotify-handlers');
       return await spotifyHandlers.handleSearchMusic(prompt, shell, win);
     }
     
     if (intent === 'SPOTIFY_CONTROL') {
+      console.log('[main] Handling Spotify control request');
       const spotifyHandlers = require('./spotify/spotify-handlers');
       return await spotifyHandlers.handleControlPlayback(prompt, shell, win);
     }
     
     if (intent === 'SPOTIFY_PLAYLIST') {
+      console.log('[main] Handling Spotify playlist request');
       const spotifyHandlers = require('./spotify/spotify-handlers');
+      
+      const playlistMatch = prompt.toLowerCase().match(/(?:play|from|play from)\s+(?:the|my)?\s*["']?([\w\s\d.]+?)["']?\s*(?:playlist|on spotify|$)/i);
+      if (playlistMatch) {
+        return await spotifyHandlers.handlePlayFromPlaylist(playlistMatch[1].trim(), shell, win);
+      }
+      
       return await spotifyHandlers.handlePlaylistOperations(prompt, shell, win);
     }
     
@@ -692,7 +771,7 @@ ${emailContent.suggestedResponse ? "\n\nSuggested response available in the view
       }
     }
     
-    return { type: 'chat', response: 'I\'m not sure how to help with that. You can ask me about your calendar events, emails, Google Drive files, Google Docs, or create Google Meet meetings.' };
+    return { type: 'chat', response: 'I can help you with calendar events, emails, Google Drive files, Google Docs, Google Meet meetings, and Spotify music. What would you like to do?' };
   } catch (err) {
     console.error('[main] Unhandled error in route-prompt:', err);
     return { type: 'error', error: err.message };
@@ -723,11 +802,45 @@ ipcMain.handle('start-auth', async () => {
   return true;
 });
 
+ipcMain.handle('start-spotify-auth', async () => {
+  try {
+    const { getAuthUrl } = require('./spotify/spotify');
+    const authUrl = await getAuthUrl();
+    shell.openExternal(authUrl);
+    return { success: true, message: 'Spotify authentication page opened' };
+  } catch (err) {
+    console.error('[main] Error starting Spotify auth:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('oauth-callback', async (event, code) => {
   try {
     await handleOAuthCallback(code);
     return { success: true };
   } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('spotify-oauth-callback', async (event, code) => {
+  try {
+    const { handleOAuthCallback } = require('./spotify/spotify');
+    await handleOAuthCallback(code);
+    return { success: true };
+  } catch (err) {
+    console.error('[main] Error in Spotify OAuth callback:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('check-spotify-auth', async () => {
+  try {
+    const { validateAndRefreshAuth } = require('./spotify/spotify');
+    const isValid = await validateAndRefreshAuth();
+    return { success: true, isAuthenticated: isValid };
+  } catch (err) {
+    console.error('[main] Error checking Spotify auth:', err);
     return { success: false, error: err.message };
   }
 });
@@ -746,4 +859,26 @@ ipcMain.on('resize-window', (event, { width, height }) => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+});
+
+ipcMain.handle('set-global-consent', async () => {
+  try {
+    const { setGlobalConsent } = require('./utils/authHelper');
+    await setGlobalConsent();
+    return { success: true };
+  } catch (err) {
+    console.error('[main] Error setting global consent:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('has-given-consent', async () => {
+  try {
+    const { hasGivenConsent } = require('./utils/authHelper');
+    const result = await hasGivenConsent();
+    return { hasConsent: result };
+  } catch (err) {
+    console.error('[main] Error checking consent status:', err);
+    return { hasConsent: false, error: err.message };
+  }
 });

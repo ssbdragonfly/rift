@@ -12,7 +12,7 @@ export const DownloadSection = () => {
         
         <div className="max-w-md mx-auto mb-12">
           <a 
-            href="/rift.zip" 
+            href="/Rift-0.1.0-arm64.dmg" 
             className="bg-black text-white p-8 hover:bg-gray-800 transition-colors duration-200 group block"
           >
             <div className="text-2xl font-semibold mb-2">Download Rift</div>

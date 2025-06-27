@@ -6,79 +6,19 @@ const axios = require('axios');
 
 async function handleCreateMeeting(prompt, shell, win) {
   try {
-    console.log('[meet-handlers] Starting to create meeting from prompt:', prompt);
+    console.log('[meet-handlers] Creating meeting from prompt:', prompt);
     await ensureAuth(win);
+    
     const { meetingDetails, emailRecipients } = await extractMeetingDetailsWithGemini(prompt);
-    console.log('[meet-handlers] Extracted meeting details:', meetingDetails ? 'yes' : 'no');
-    console.log('[meet-handlers] Extracted email recipients:', emailRecipients);
     
     if (!meetingDetails) {
-      console.log('[meet-handlers] No meeting details from Gemini, using calendar parser');
-      const parsed = await parseEvent(prompt);
-      if (typeof parsed === 'string') {
-        return { type: 'chat', response: parsed };
-      }
-      
-      if (!parsed.start || !parsed.end) {
-        return { 
-          type: 'chat', 
-          response: `I understood you want to create a meeting, but I need more information about the date and time.` 
-        };
-      }
-      
-      console.log('[meet-handlers] Creating meeting with parsed details:', parsed.title);
-      const meeting = await meetFunctions.createMeeting(
-        parsed.title,
-        parsed.start,
-        parsed.end,
-        parsed.attendees || [],
-        parsed.description || ''
-      );
-      console.log('[meet-handlers] Meeting created successfully with ID:', meeting.id);
-      const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
-      const emails = prompt.match(emailRegex) || [];
-      if (emails.length > 0 && /\b(email|send|share|invite)\b/i.test(prompt)) {
-        try {
-          console.log('[meet-handlers] Sending meeting link via email to:', emails);
-          const { ensureEmailAuth, getUserEmail, sendEmail } = require('../email/email');
-          await ensureEmailAuth(win);
-          
-          const userEmail = await getUserEmail();
-          const { generateMeetingInvitation } = require('./emailTemplates');
-          const emailContent = await generateMeetingInvitation(meeting, userEmail, prompt);
-          const emailDraft = {
-            from: userEmail,
-            to: emails.join(', '),
-            subject: emailContent.subject,
-            body: emailContent.body
-          };
-          
-          await sendEmail(emailDraft);
-          console.log('[meet-handlers] Email sent successfully');
-          
-          return { 
-            type: 'meet-create', 
-            response: `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}\n\nShared the meeting link via email with: ${emails.join(', ')}`,
-            meeting: meeting
-          };
-        } catch (err) {
-          console.error('[meet-handlers] Error sending meeting link via email:', err);
-          return { 
-            type: 'meet-create', 
-            response: `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}\n\nNote: I couldn't send the meeting link via email due to an error: ${err.message}`,
-            meeting: meeting
-          };
-        }
-      }
-      
-      return { 
-        type: 'meet-create', 
-        response: `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}\n\nAttendees: ${meeting.attendees ? meeting.attendees.map(a => a.email).join(', ') : 'None'}`,
-        meeting: meeting
+      return{
+        type: 'error', 
+        error: 'Unable to extract meeting details. Please try again with more specific information.' 
       };
     }
     
-    console.log('[meet-handlers] Creating meeting with extracted details:', meetingDetails.title);
+    console.log('[meet-handlers] Creating meeting:', meetingDetails.title);
     const meeting = await meetFunctions.createMeeting(
       meetingDetails.title,
       meetingDetails.start,
@@ -86,45 +26,39 @@ async function handleCreateMeeting(prompt, shell, win) {
       meetingDetails.attendees || [],
       meetingDetails.description || ''
     );
-    console.log('[meet-handlers] Meeting created successfully with ID:', meeting.id);
+    
+    let response = `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}`;
     
     if (emailRecipients && emailRecipients.length > 0) {
       try {
-        console.log('[meet-handlers] Sending meeting link via email to:', emailRecipients);
         const { ensureEmailAuth, getUserEmail, sendEmail } = require('../email/email');
         await ensureEmailAuth(win);
         const userEmail = await getUserEmail();
         const { generateMeetingInvitation } = require('./emailTemplates');
         const emailContent = await generateMeetingInvitation(meeting, userEmail, prompt);
-        const emailDraft = {
+        
+        await sendEmail({
           from: userEmail,
           to: emailRecipients.join(', '),
           subject: emailContent.subject,
           body: emailContent.body
-        };
+        });
         
-        await sendEmail(emailDraft);
-        console.log('[meet-handlers] Email sent successfully');
-        
-        return { 
-          type: 'meet-create', 
-          response: `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}\n\nShared the meeting link via email with: ${emailRecipients.join(', ')}`,
-          meeting: meeting
-        };
+        response += `\n\nShared via email with: ${emailRecipients.join(', ')}`;
       } catch (err) {
-        console.error('[meet-handlers] Error sending meeting link via email:', err);
-        return { 
-          type: 'meet-create', 
-          response: `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}\n\nNote: I couldn't send the meeting link via email due to an error: ${err.message}`,
-          meeting: meeting
-        };
+        console.error('[meet-handlers] Error sending email:', err);
+        response += `\n\nNote: Couldn't send email invitation: ${err.message}`;
       }
+    }
+    
+    if (meeting.attendees && meeting.attendees.length > 0) {
+      response += `\n\nAttendees: ${meeting.attendees.map(a => a.email).join(', ')}`;
     }
     
     return { 
       type: 'meet-create', 
-      response: `Created Google Meet: "${meeting.summary}"\n\nMeet link: ${meeting.meetLink}\n\nAttendees: ${meeting.attendees ? meeting.attendees.map(a => a.email).join(', ') : 'None'}`,
-      meeting: meeting
+      response,
+      meeting
     };
   } catch (err) {
     console.error('[meet-handlers] Error creating meeting:', err);
@@ -222,119 +156,80 @@ async function handleShareMeetingViaEmail(prompt, shell, win) {
 }
 
 async function extractMeetingDetailsWithGemini(prompt) {
-  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
-  const emails = prompt.match(emailRegex) || [];
-  const defaultEmailRecipients = /\b(email|send|share|invite)\b/i.test(prompt) ? emails : [];
-  
   if (!process.env.GEMINI_API_KEY) {
-    console.log('[meet-handlers] No Gemini API key, using regex fallback');
-    return { 
-      meetingDetails: null, 
-      emailRecipients: defaultEmailRecipients
-    };
+    console.log('[meet-handlers] No Gemini API key available');
+    return { meetingDetails: null, emailRecipients: [] };
   }
   
   try {
-    console.log('[meet-handlers] Sending request to Gemini API for meeting details');
+    console.log('[meet-handlers] Using Gemini to extract meeting details');
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + process.env.GEMINI_API_KEY;
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    
     const geminiPrompt = `
-    Extract meeting details and email recipients from this request:
-    "${prompt}"
+    Extract meeting details from this request: "${prompt}"
     
-    Return a JSON object with these fields:
-    - meetingDetails: An object containing meeting information with these fields:
-      - title: The title for the meeting (do NOT include email addresses in the title)
-      - start: The start time in ISO format (e.g., "2023-06-15T15:00:00-07:00")
-      - end: The end time in ISO format
-      - attendees: An array of email addresses for attendees (can be empty)
-      - description: Meeting description (or null if not specified)
-    - emailRecipients: An array of email addresses to send the meeting link to (separate from attendees)
+    Current time: ${now.toISOString()}
     
-    IMPORTANT: If the user wants to "email the meeting link" or similar, extract the email addresses and put them in emailRecipients, NOT in the meeting title.
+    Create a meeting with smart defaults if information is missing:
+    - If no time specified, use next hour (${new Date(now.getTime() + 60 * 60 * 1000).toISOString()})
+    - If no duration specified, make it 1 hour
+    - If vague like "make a meeting", create for next available time
     
-    Examples:
-    Request: "Create a Google Meet for tomorrow at 3pm and email it to john@example.com"
-    Response: {
+    Return JSON:
+    {
       "meetingDetails": {
-        "title": "Meeting",
-        "start": "2023-06-15T15:00:00-07:00",
-        "end": "2023-06-15T16:00:00-07:00",
-        "attendees": [],
-        "description": null
+        "title": "Meeting title (default: 'Meeting')",
+        "start": "ISO datetime",
+        "end": "ISO datetime", 
+        "attendees": ["email addresses"],
+        "description": "description or null"
       },
-      "emailRecipients": ["john@example.com"]
+      "emailRecipients": ["emails to send meeting link to"]
     }
     
-    Request: "make a google meet and invite bishtshaurya314@gmail.com"
-    Response: {
-      "meetingDetails": {
-        "title": "Meeting",
-        "start": "2023-06-15T15:00:00-07:00",
-        "end": "2023-06-15T16:00:00-07:00",
-        "attendees": [],
-        "description": null
-      },
-      "emailRecipients": ["bishtshaurya314@gmail.com"]
-    }
-    
-    Only return the JSON object, nothing else.
+    Be smart about extracting emails and times. Return only the JSON.
     `;
     
     const body = {
       contents: [{ parts: [{ text: geminiPrompt }] }],
       generationConfig: {
-        temperature: 0.1,
-        topP: 1.0,
-        topK: 1
+        temperature: 0.2,
+        topP: 0.9,
+        topK: 40
       }
     };
     
-    const resp = await axios.post(url, body, { timeout: 5000 });
+    const resp = await axios.post(url, body, { timeout: 8000 });
     const text = resp.data.candidates[0].content.parts[0].text.trim();
-    console.log('[meet-handlers] Received response from Gemini API');
     
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const result = JSON.parse(jsonMatch[0]);
-        console.log('[meet-handlers] Successfully parsed Gemini response');
-        if (result.meetingDetails && result.meetingDetails.title) {
-          const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/;
-          if (emailRegex.test(result.meetingDetails.title)) {
-            console.log('[meet-handlers] Found email in title, removing');
-            result.meetingDetails.title = "Meeting";
-          }
-        }
-        
-        if (!result.emailRecipients || result.emailRecipients.length === 0) {
-          if (emails.length > 0 && /\b(email|send|share|invite)\b/i.test(prompt)) {
-            console.log('[meet-handlers] Adding emails from prompt to recipients:', emails);
-            result.emailRecipients = emails;
-          }
-        }
-        
-        return result;
-      } else {
-        console.error('[meet-handlers] No JSON found in Gemini response');
-      }
-    } catch (err) {
-      console.error('[meet-handlers] Error parsing Gemini response:', err);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const result = JSON.parse(jsonMatch[0]);
+      console.log('[meet-handlers] Successfully extracted meeting details with Gemini');
+      return result;
     }
-    
-    console.log('[meet-handlers] Falling back to regex extraction');
-    return { 
-      meetingDetails: null, 
-      emailRecipients: defaultEmailRecipients
-    };
   } catch (err) {
-    console.error('[meet-handlers] Error using Gemini for meeting details extraction:', err);
-    
-    console.log('[meet-handlers] Falling back to regex extraction after error');
-    return { 
-      meetingDetails: null, 
-      emailRecipients: defaultEmailRecipients
-    };
+    console.error('[meet-handlers] Error using Gemini for meeting extraction:', err);
   }
+  
+  const now = new Date();
+  const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
+  const endTime = new Date(nextHour.getTime() + 60 * 60 * 1000);
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+  const emails = prompt.match(emailRegex) || [];
+  
+  return {
+    meetingDetails: {
+      title: "Meeting",
+      start: nextHour.toISOString(),
+      end: endTime.toISOString(),
+      attendees: emails,
+      description: null
+    },
+    emailRecipients: /\b(email|send|share)\b/i.test(prompt) ? emails : []
+  };
 }
 
 async function extractMeetingAttendeesWithGemini(prompt) {

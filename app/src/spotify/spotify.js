@@ -50,11 +50,15 @@ async function storeTokens(tokens) {
     
     await keytar.setPassword(SERVICE, ACCOUNT, JSON.stringify(tokens));
     console.log('[spotify] Tokens stored in keytar');
+    return tokens;
   } catch (err) {
     console.error('[spotify] Error storing tokens:', err);
     throw err;
   }
 }
+
+let globalServer = null;
+let isServerRunning = false;
 
 async function getAuthUrl() {
   try {
@@ -62,8 +66,13 @@ async function getAuthUrl() {
       throw new Error('Spotify client credentials not configured');
     }
     
-    const port = await getAvailablePort();
-    redirectUri = `http://localhost:${port}/oauth2callback`;
+    console.log('[spotify] Getting auth URL with client ID:', process.env.SPOTIFY_CLIENT_ID);
+    
+    const port = 51739;
+    
+    redirectUri = `http://127.0.0.1:${port}/oauth2callback`;
+    
+    console.log('[spotify] Using redirect URI:', redirectUri);
     
     const scopes = [
       'user-read-private',
@@ -82,28 +91,50 @@ async function getAuthUrl() {
     authUrl.searchParams.append('redirect_uri', redirectUri);
     authUrl.searchParams.append('scope', scopes.join(' '));
     
-    const app = express();
+    if (!isServerRunning) {
+      const app = express();
+      if (globalServer) {
+        try {
+          globalServer.close();
+        } catch (e) {
+          console.log('[spotify] Error closing existing server:', e);
+        }
+      }
+      
+      try {
+        globalServer = app.listen(port, () => {
+          console.log(`[spotify] Server listening on port ${port}`);
+          isServerRunning = true;
+        });
+        
+        app.get('/oauth2callback', async (req, res) => {
+          const code = req.query.code;
+          if (code) {
+            try {
+              console.log('[spotify] Received auth code, handling callback');
+              await handleOAuthCallback(code);
+              res.send('<h2>Authentication successful! You may close this window and return to Rift.</h2>');
+            }
+            catch (err) {
+              console.error('[spotify] Auth callback error:', err);
+              res.send('<h2>Authentication failed: ' + err.message + '</h2>');
+            }
+          }
+          else {
+            res.send('<h2>No code received.</h2>');
+          }
+        });
+      } catch (err) {
+        console.log(`[spotify] Port ${port} already in use, assuming server is running`);
+        isServerRunning = true;
+      }
+    } else {
+      console.log('[spotify] Server already running, reusing');
+    }
     
-    return new Promise((resolve) => {
-      const server = app.listen(port);
-      app.get('/oauth2callback', async (req, res) => {
-        const code = req.query.code;
-        if (code) {
-          try {
-            await handleOAuthCallback(code);
-            res.send('<h2>Authentication successful! You may close this window and return to Rift.</h2>');
-          }
-          catch (err) {
-            res.send('<h2>Authentication failed: ' + err.message + '</h2>');
-          }
-        }
-        else {
-          res.send('<h2>No code received.</h2>');
-        }
-        server.close();
-      });
-      resolve(authUrl.toString());
-    });
+    const finalUrl = authUrl.toString();
+    console.log('[spotify] Generated auth URL');
+    return finalUrl;
   }
   catch (err) {
     console.error('[spotify] Error generating auth URL:', err);
@@ -113,14 +144,24 @@ async function getAuthUrl() {
 
 async function handleOAuthCallback(code) {
   try {
+    console.log('[spotify] Handling OAuth callback with code');
+    
+    const callbackUri = 'http://127.0.0.1:51739/oauth2callback';
+    console.log('[spotify] Using redirect URI:', callbackUri);
+    console.log('[spotify] Token request params:', {
+      grant_type: 'authorization_code',
+      code: code ? 'present' : 'missing',
+      redirect_uri: callbackUri
+    });
+    
     const response = await axios({
       method: 'post',
       url: 'https://accounts.spotify.com/api/token',
-      params: {
+      data: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: redirectUri
-      },
+        redirect_uri: callbackUri
+      }).toString(),
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': 'Basic ' + Buffer.from(
@@ -138,24 +179,30 @@ async function handleOAuthCallback(code) {
     
     tokens.expiry_date = Date.now() + (tokens.expires_in * 1000);
     
-    await storeTokens(tokens);
-    return tokens;
+    const storedTokens = await storeTokens(tokens);
+    console.log('[spotify] Successfully stored tokens');
+    return storedTokens;
   }
   catch (err) {
     console.error('[spotify] Error getting tokens:', err);
+    if (err.response && err.response.data) {
+      console.error('[spotify] API error details:', err.response.data);
+    }
     throw err;
   }
 }
 
 async function refreshAccessToken(refreshToken) {
   try {
+    console.log('[spotify] Refreshing access token');
+    
     const response = await axios({
       method: 'post',
       url: 'https://accounts.spotify.com/api/token',
-      params: {
+      data: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken
-      },
+      }).toString(),
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': 'Basic ' + Buffer.from(
@@ -165,6 +212,7 @@ async function refreshAccessToken(refreshToken) {
     });
     
     const tokens = response.data;
+    console.log('[spotify] Refresh token response received');
     
     if (!tokens || !tokens.access_token) {
       throw new Error('Invalid token response during refresh');
@@ -175,8 +223,9 @@ async function refreshAccessToken(refreshToken) {
     
     tokens.expiry_date = Date.now() + (tokens.expires_in * 1000);
     
-    await storeTokens(tokens);
-    return tokens;
+    const storedTokens = await storeTokens(tokens);
+    console.log('[spotify] Refreshed tokens stored successfully');
+    return storedTokens;
   }
   catch (err) {
     console.error('[spotify] Error refreshing token:', err);
@@ -184,11 +233,30 @@ async function refreshAccessToken(refreshToken) {
   }
 }
 
+let authWindowOpened = false;
 async function ensureAuth(win) {
   try {
     let tokens = await getStoredTokens();
     if (!tokens || !tokens.access_token) {
       console.error('[spotify] No valid access token');
+      
+      if (win && !authWindowOpened) {
+        console.log('[spotify] Opening Spotify auth page automatically');
+        try {
+          const authUrl = await getAuthUrl();
+          shell.openExternal(authUrl);
+          authWindowOpened = true;
+          setTimeout(() => {
+            authWindowOpened = false;
+            console.log('[spotify] Auth window flag reset');
+          }, 30000);
+        } catch (authErr) {
+          console.error('[spotify] Error opening auth URL:', authErr);
+        }
+      } else if (authWindowOpened) {
+        console.log('[spotify] Auth window already opened, not opening another');
+      }
+      
       throw new Error('auth required');
     }
     
@@ -200,6 +268,25 @@ async function ensureAuth(win) {
       }
       catch (err) {
         console.error('[spotify] Failed to refresh token:', err);
+        
+        if (win && !authWindowOpened) {
+          console.log('[spotify] Opening Spotify auth page automatically after refresh failure');
+          try {
+            const authUrl = await getAuthUrl();
+            shell.openExternal(authUrl);
+            authWindowOpened = true;
+            
+            setTimeout(() => {
+              authWindowOpened = false;
+              console.log('[spotify] Auth window flag reset');
+            }, 30000);
+          } catch (authErr) {
+            console.error('[spotify] Error opening auth URL:', authErr);
+          }
+        } else if (authWindowOpened) {
+          console.log('[spotify] Auth window already opened, not opening another');
+        }
+        
         throw new Error('auth required');
       }
     }
@@ -375,6 +462,28 @@ async function skipToPrevious() {
   }
 }
 
+async function getAvailableDevices() {
+  try {
+    const accessToken = await ensureAuth();
+    
+    const response = await axios({
+      method: 'get',
+      url: 'https://api.spotify.com/v1/me/player/devices',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    return response.data.devices || [];
+  } catch (err) {
+    console.error('[spotify] Error getting available devices:', err);
+    if (err.response && err.response.status === 401) {
+      throw new Error('auth required');
+    }
+    throw err;
+  }
+}
+
 async function getCurrentPlayback() {
   try {
     const accessToken = await ensureAuth();
@@ -484,7 +593,7 @@ async function getUserPlaylists() {
   }
   catch (err) {
     console.error('[spotify] Error getting user playlists:', err);
-    if (err.response && err.response.status === 401) {
+    if (err.response && err.response.status === 401) { 
       throw new Error('auth required');
     }
     throw err;
@@ -502,8 +611,9 @@ async function validateAndRefreshAuth() {
     if (tokens.expiry_date && tokens.expiry_date < Date.now()) {
       console.log('[spotify] Token expired, refreshing...');
       try {
-        await refreshAccessToken(tokens.refresh_token);
+        const refreshedTokens = await refreshAccessToken(tokens.refresh_token);
         console.log('[spotify] Token refreshed successfully');
+        return !!refreshedTokens;
       }
       catch (err) {
         console.error('[spotify] Failed to refresh token:', err);
@@ -519,6 +629,7 @@ async function validateAndRefreshAuth() {
   }
 }
 
+
 module.exports = {
   getAuthUrl,
   handleOAuthCallback,
@@ -533,5 +644,6 @@ module.exports = {
   createPlaylist,
   addTracksToPlaylist,
   getUserPlaylists,
+  getAvailableDevices,
   validateAndRefreshAuth
 };
